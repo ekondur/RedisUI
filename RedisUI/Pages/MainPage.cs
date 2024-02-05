@@ -1,17 +1,17 @@
-﻿using System.Collections.Generic;
-using System.Drawing;
+﻿using RedisUI.Models;
+using System.Collections.Generic;
 using System.Text;
 
 namespace RedisUI.Pages
 {
     public static class MainPage
     {
-        public static string Build(Dictionary<string, string> keyValues, long next)
+        public static string Build(List<KeyModel> keys, long next, string dbSize)
         {
             var tbody = new StringBuilder();
-            foreach (var item in keyValues)
+            foreach (var key in keys)
             {
-                tbody.Append($"<tr data-value='{item.Value}'><td>{item.Key}</td></tr>");
+                tbody.Append($"<tr data-value='{key.Value.ToString()}'><td>{key.KeyName}</td></tr>");
             }
 
             var html = $@"
@@ -70,6 +70,10 @@ namespace RedisUI.Pages
 
         .table tbody tr:hover td, .table tbody tr:hover th {{
             background-color: #f2f2f2;
+        }}
+
+        .dbsize{{
+            float: right;
         }}
 </style>
 
@@ -162,8 +166,13 @@ namespace RedisUI.Pages
           }}
         }});
 
+        const dbsize = document.createElement('span');
+        dbsize.innerText = ""Total Keys: {dbSize}"";
+        dbsize.className = ""dbsize"";
+
         searchContainer.appendChild(sInput);
         searchContainer.appendChild(sBtn);
+        searchContainer.appendChild(dbsize);
 
         function showPage(page, db, key) {{
             var currentPath = window.location.href.replace(window.location.search, '');
