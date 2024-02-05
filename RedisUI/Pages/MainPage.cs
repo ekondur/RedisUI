@@ -11,7 +11,7 @@ namespace RedisUI.Pages
             var tbody = new StringBuilder();
             foreach (var key in keys)
             {
-                tbody.Append($"<tr data-value='{key.Value.ToString()}'><td>{key.KeyName}</td></tr>");
+                tbody.Append($"<tr data-value='{key.Value.ToString()}'><td>{key.KeyType}</td><td>{key.KeyName}</td></tr>");
             }
 
             var html = $@"
@@ -84,6 +84,7 @@ namespace RedisUI.Pages
 <table id=""redisTable"" class=""table"">
     <thead>
         <tr>
+            <th>Type</th>
             <th>Key</th>
         </tr>
     </thead>
