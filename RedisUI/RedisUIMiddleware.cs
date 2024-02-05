@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using StackExchange.Redis;
 using RedisUI.Pages;
 using System.Linq;
+using RedisUI.Models;
 
 namespace RedisUI
 {
@@ -27,7 +28,9 @@ namespace RedisUI
                 int currentDb = string.IsNullOrEmpty(db) ? 0 : int.Parse(db);
 
                 IDatabase redisDb = ConnectionMultiplexer.Connect(_connString).GetDatabase(currentDb);
-             
+
+                var dbSize = redisDb.Execute("DBSIZE");
+
                 int pageSize = 10;
                 var page = context.Request.Query["page"].ToString();
 
@@ -46,16 +49,18 @@ namespace RedisUI
                 }
 
                 var innerResult = (RedisResult[])result;
-                var keys = (string[])innerResult[1];
-
-                var keyValues = keys.ToDictionary(x => x, null);
+                var keys = ((string[])innerResult[1]).Select(x => new KeyModel
+                {
+                    KeyName = x,
+                    KeyType = redisDb.KeyType(x)
+                }).ToList();
 
                 foreach (var key in keys)
                 {
-                    keyValues[key] = redisDb.StringGet(key);
+                    key.Value = redisDb.StringGet(key.KeyName);
                 }
 
-                await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keyValues, keyValues.Count > 0 ? long.Parse((string)innerResult[0]) : 0)));
+                await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0, dbSize.ToString())));
                 return;
             }
 
