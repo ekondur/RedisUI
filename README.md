@@ -1,1 +1,1 @@
-# RedisUI
+# Redis Integrated UI
