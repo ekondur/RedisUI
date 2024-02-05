@@ -29,7 +29,7 @@ namespace RedisUI
 
                 IDatabase redisDb = ConnectionMultiplexer.Connect(_connString).GetDatabase(currentDb);
 
-                var dbSize = redisDb.Execute("DBSIZE");
+                var dbSize = await redisDb.ExecuteAsync("DBSIZE");
 
                 int pageSize = 10;
                 var page = context.Request.Query["page"].ToString();
@@ -41,23 +41,23 @@ namespace RedisUI
                 RedisResult result = null;
                 if (string.IsNullOrEmpty(searchKey))
                 {
-                    result = redisDb.Execute("SCAN", cursor.ToString(), "COUNT", pageSize.ToString());
+                    result = await redisDb.ExecuteAsync("SCAN", cursor.ToString(), "COUNT", pageSize.ToString());
                 }
                 else
                 {
-                    result = redisDb.Execute("SCAN", cursor.ToString(), "MATCH", searchKey, "COUNT", pageSize.ToString());
+                    result = await redisDb.ExecuteAsync("SCAN", cursor.ToString(), "MATCH", searchKey, "COUNT", pageSize.ToString());
                 }
 
                 var innerResult = (RedisResult[])result;
                 var keys = ((string[])innerResult[1]).Select(x => new KeyModel
                 {
                     KeyName = x,
-                    KeyType = redisDb.KeyType(x)
                 }).ToList();
 
                 foreach (var key in keys)
                 {
-                    key.Value = redisDb.StringGet(key.KeyName);
+                    key.KeyType = await redisDb.KeyTypeAsync(key.KeyName);
+                    key.Value = await redisDb.StringGetAsync(key.KeyName);
                 }
 
                 await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0, dbSize.ToString())));
