@@ -21,7 +21,7 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
-app.UseRedisUI("localhost");
+app.UseRedisUI();
 
 app.UseAuthorization();
 

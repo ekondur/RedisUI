@@ -10,24 +10,22 @@ namespace RedisUI
     public class RedisUIMiddleware
     {
         private readonly RequestDelegate _next;
-        private readonly string _path;
-        private readonly string _connString;
+        private readonly RedisUISettings _settings;
 
-        public RedisUIMiddleware(RequestDelegate next, string connString, string path)
+        public RedisUIMiddleware(RequestDelegate next, RedisUISettings settings)
         {
             _next = next;
-            _path = path;
-            _connString = connString;
+            _settings = settings;
         }
 
         public async Task InvokeAsync(HttpContext context)
         {
-            if (context.Request.Path.ToString().StartsWith(_path))
+            if (context.Request.Path.ToString().StartsWith(_settings.Path))
             {
                 var db = context.Request.Query["db"].ToString();
                 int currentDb = string.IsNullOrEmpty(db) ? 0 : int.Parse(db);
 
-                IDatabase redisDb = ConnectionMultiplexer.Connect(_connString).GetDatabase(currentDb);
+                IDatabase redisDb = ConnectionMultiplexer.Connect(_settings.ConnectionString).GetDatabase(currentDb);
 
                 var dbSize = await redisDb.ExecuteAsync("DBSIZE");
 
