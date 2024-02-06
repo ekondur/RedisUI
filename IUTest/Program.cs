@@ -1,3 +1,4 @@
+using IUTest;
 using RedisUI;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,7 +22,10 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
-app.UseRedisUI();
+app.UseRedisUI(new RedisUISettings
+{
+    AuthorizationFilter = new FooAuthorizationFilter()
+});
 
 app.UseAuthorization();
 
