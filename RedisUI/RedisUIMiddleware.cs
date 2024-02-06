@@ -22,6 +22,12 @@ namespace RedisUI
         {
             if (context.Request.Path.ToString().StartsWith(_settings.Path))
             {
+                if (_settings.AuthorizationFilter != null && !_settings.AuthorizationFilter.Authorize(context))
+                {
+                    context.Response.StatusCode = 403;
+                    return;
+                }
+
                 var db = context.Request.Query["db"].ToString();
                 int currentDb = string.IsNullOrEmpty(db) ? 0 : int.Parse(db);
 
