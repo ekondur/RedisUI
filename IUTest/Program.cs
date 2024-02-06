@@ -24,7 +24,7 @@ app.UseRouting();
 
 app.UseRedisUI(new RedisUISettings
 {
-    AuthorizationFilter = new FooAuthorizationFilter()
+    AuthorizationFilter = new FooAuthorizationFilter(app.Environment.IsDevelopment())
 });
 
 app.UseAuthorization();
