@@ -35,8 +35,9 @@ namespace RedisUI
 
                 var dbSize = await redisDb.ExecuteAsync("DBSIZE");
 
-                int pageSize = 10;
                 var page = context.Request.Query["page"].ToString();
+
+                var pageSize = string.IsNullOrEmpty(context.Request.Query["size"]) ? "10" : context.Request.Query["size"].ToString();
 
                 long cursor = string.IsNullOrEmpty(page) ? 0 : long.Parse(page);
 

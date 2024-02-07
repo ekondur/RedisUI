@@ -16,12 +16,22 @@ namespace RedisUI.Pages
 
             var html = $@"
     <div class=""row"">
-        <div id=""search"" class=""input-group mb-3""></div> 
+        <div class=""col-6""><div id=""search"" class=""input-group mb-3""></div></div>
+        <div class=""col-6"">
+            <ul class=""pagination"">
+                <li class=""page-item"" id=""size10""><a class=""page-link"" href=""javascript:setSize(10);"">10</a></li>
+                <li class=""page-item"" id=""size20""><a class=""page-link"" href=""javascript:setSize(20);"">20</a></li>
+                <li class=""page-item"" id=""size50""><a class=""page-link"" href=""javascript:setSize(50);"">50</a></li>
+                <li class=""page-item"" id=""size100""><a class=""page-link"" href=""javascript:setSize(100);"">100</a></li>
+                <li class=""page-item"" id=""size500""><a class=""page-link"" href=""javascript:setSize(500);"">500</a></li>
+                <li class=""page-item"" id=""size1000""><a class=""page-link"" href=""javascript:setSize(1000);"">1000</a></li>
+            </ul>
+        </div> 
     </div>
     <div class=""row"">
         <div class=""col-6"">
-            <table class=""table table-hover"" id=""redisTable"" class=""table"">
-                <thead>
+            <table class=""table table-hover"" id=""redisTable"">
+                <thead class=""sticky-top"">
                     <tr>
                         <th>Type</th>
                         <th>Key</th>
@@ -36,7 +46,7 @@ namespace RedisUI.Pages
         </div>
 
         <div class=""col-6"">
-            <div class=""card border-info mb-3"">
+            <div class=""card border-info mb-3 sticky-top"">
                 <div class=""card-header"">Value</div>
                 <div class=""card-body"">
                     <code><p id=""valueContent"">Click on a key to get value...</p></code>
@@ -51,6 +61,7 @@ namespace RedisUI.Pages
         let currentPage = 0;
         let currentDb = 0;
         let currentKey = null;
+        let currentSize = 10;
 
         const table = document.getElementById('redisTable');
 
@@ -58,6 +69,7 @@ namespace RedisUI.Pages
 		var paramPage = searchParams.get('page');
         var paramDb = searchParams.get('db');
         var paramKey = searchParams.get('key');
+        var paramSize = searchParams.get('size');
 
         if (paramPage) {{
             currentPage = paramPage;
@@ -69,6 +81,10 @@ namespace RedisUI.Pages
 
         if (paramKey) {{
             currentKey = paramKey;
+        }}
+
+        if (paramSize) {{
+            currentSize = paramSize;
         }}
 
         const paginationContainer = document.getElementById('pagination');
@@ -119,7 +135,7 @@ namespace RedisUI.Pages
         function showPage(page, db, key) {{
             var currentPath = window.location.href.replace(window.location.search, '');
 
-			var newQueryString = ""page="" + page + ""&db="" + db;
+			var newQueryString = ""page="" + page + ""&db="" + db + ""&size="" + currentSize;
 
             if (key) {{
                 newQueryString = newQueryString + ""&key="" + key;
@@ -143,6 +159,9 @@ namespace RedisUI.Pages
 
     var navElement = document.getElementById(""nav""+currentDb);
     navElement.classList.add(""active"");
+
+    var sizeElement = document.getElementById(""size""+currentSize);
+    sizeElement.classList.add(""active"");
 
     }});
 
