@@ -17,7 +17,6 @@
         .pagination {{
             display: flex;
             justify-content: center;
-            margin-top: 20px;
         }}
 
         .table {{
@@ -31,10 +30,43 @@
     </style>
 
 <script>
+
     function setdb(db){{
         var currentPath = window.location.href.replace(window.location.search, '');
         window.location = currentPath.replace('#', '') + '?page=0&db=' + db;
     }}
+
+    function setSize(size){{
+        let currentDb = 0;
+        let currentKey = '';
+        let currentSize = 10;
+
+        var searchParams = new URLSearchParams(window.location.search);
+        var paramDb = searchParams.get('db');
+        var paramKey = searchParams.get('key');
+        var paramSize = searchParams.get('size');
+
+        if (paramDb) {{
+            currentDb = paramDb;
+		}}
+
+        if (paramKey) {{
+            currentKey = paramKey;
+        }}
+
+        if (paramSize) {{
+            currentSize = paramSize;
+        }}
+
+        var currentPath = window.location.href.replace(window.location.search, '');
+
+		newQueryString = ""&db="" + currentDb + ""&size="" + size + ""&key="" + currentKey;
+
+		newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
+		
+        window.location = newUrl.replace('#', '');
+    }}
+
 </script>
 
 </head>
