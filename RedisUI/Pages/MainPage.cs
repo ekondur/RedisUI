@@ -6,102 +6,45 @@ namespace RedisUI.Pages
 {
     public static class MainPage
     {
-        public static string Build(List<KeyModel> keys, long next, string dbSize)
+        public static string Build(List<KeyModel> keys, long next)
         {
             var tbody = new StringBuilder();
             foreach (var key in keys)
             {
-                tbody.Append($"<tr data-value='{key.Value.ToString()}'><td>{key.KeyType}</td><td>{key.KeyName}</td></tr>");
+                tbody.Append($"<tr data-value='{key.Value.ToString()}'><td><span class=\"badge text-bg-secondary\">{key.KeyType}</span></td><td>{key.KeyName}</td></tr>");
             }
 
             var html = $@"
-    <style>
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
-        }}
+    <div class=""row"">
+        <div id=""search"" class=""input-group mb-3""></div> 
+    </div>
+    <div class=""row"">
+        <div class=""col-6"">
+            <table class=""table table-hover"" id=""redisTable"" class=""table"">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Key</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {tbody}
+                </tbody>
+            </table>
+            <div class=""pagination"" id=""pagination"">
+            </div>
+        </div>
 
-        table, th, td {{
-            border: 1px solid #ddd;
-        }}
+        <div class=""col-6"">
+            <div class=""card border-info mb-3"">
+                <div class=""card-header"">Value</div>
+                <div class=""card-body"">
+                    <code><p id=""valueContent"">Click on a key to get value...</p></code>
+                </div>
+            </div>
+        </div>
+    <div/>
 
-        th, td {{
-            padding: 8px;
-            text-align: left;
-        }}
-
-        th {{
-            background-color: #f2f2f2;
-        }}
-
-        .pagination {{display: flex;
-            justify-content: center;
-            margin-top: 20px;
-        }}
-
-        .pagination button {{
-            margin: 0 5px;
-            padding: 8px 12px;
-            text-decoration: none;
-            cursor: pointer;
-            }}
-
-        .pagination button.active {{
-            background-color: #4CAF50;
-            color: white;
-        }}
-
-        .container-left{{
-            width: 50%;
-            float: left;
-        }}
-
-        .container-right{{
-            width: 49%;
-            float: left;
-            margin-left: 1%;
-            word-wrap: break-word;
-        }}
-
-        .table tr {{
-            cursor: pointer;
-        }}
-
-        .table tbody tr:hover td, .table tbody tr:hover th {{
-            background-color: #f2f2f2;
-        }}
-
-        .dbsize{{
-            float: right;
-        }}
-</style>
-
-<div id=""search""></div> 
-
-<div class=""container"">
-<div class=""container-left"">
-<table id=""redisTable"" class=""table"">
-    <thead>
-        <tr>
-            <th>Type</th>
-            <th>Key</th>
-        </tr>
-    </thead>
-    <tbody>
-        {tbody}
-    </tbody>
-</table>
-
-<div class=""pagination"" id=""pagination"">
-</div>
-</div>
-
-<div class=""container-right"">
-    <h3>Value:</h3>
-    <code><p id=""valueContent"">Click on a key to get value...</p></code>
-</div>
-<div/>
 <script>
     
     document.addEventListener('DOMContentLoaded', function () {{
@@ -133,6 +76,7 @@ namespace RedisUI.Pages
 
         const nBtn = document.createElement('button');
         nBtn.innerText = {next} == 0 ? 'Back to top' : 'Next';
+        nBtn.className = ""btn btn-outline-success"";
         nBtn.addEventListener('click', function () {{
             showPage({next}, currentDb, currentKey);
          }});
@@ -144,6 +88,7 @@ namespace RedisUI.Pages
         const sInput = document.createElement('input');
         sInput.type = ""text"";
         sInput.name = ""searchInput"";
+        sInput.className = ""form-control"";
         sInput.placeholder = ""key or pattern..."";
         if (currentKey) {{
             sInput.value = currentKey;
@@ -151,6 +96,7 @@ namespace RedisUI.Pages
 
         const sBtn = document.createElement('button');
         sBtn.innerText = 'Search';
+        sBtn.className = 'btn btn-outline-success btn-sm';
         sBtn.addEventListener('click', function () {{
             var searchText = sInput.value;
             if (searchText) {{
@@ -167,13 +113,8 @@ namespace RedisUI.Pages
           }}
         }});
 
-        const dbsize = document.createElement('span');
-        dbsize.innerText = ""Total Keys: {dbSize}"";
-        dbsize.className = ""dbsize"";
-
         searchContainer.appendChild(sInput);
         searchContainer.appendChild(sBtn);
-        searchContainer.appendChild(dbsize);
 
         function showPage(page, db, key) {{
             var currentPath = window.location.href.replace(window.location.search, '');
@@ -188,7 +129,7 @@ namespace RedisUI.Pages
 			var newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
 			
             // Change the current page URL
-            window.location = newUrl;
+            window.location = newUrl.replace('#', '');
         }}
 
         const tableRows = document.querySelectorAll(""#redisTable tbody tr"");
