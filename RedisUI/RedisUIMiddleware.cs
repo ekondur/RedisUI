@@ -64,7 +64,7 @@ namespace RedisUI
                     key.Value = await redisDb.StringGetAsync(key.KeyName);
                 }
 
-                await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0, dbSize.ToString())));
+                await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), _settings));
                 return;
             }
 
