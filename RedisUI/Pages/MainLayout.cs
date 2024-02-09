@@ -23,10 +23,6 @@
             margin-top: 5px;
         }}
 
-        .table tr {{
-            cursor: pointer;
-        }}
-
         .dropdown-menu {{
             z-index: 1021;
         }}
@@ -81,6 +77,13 @@
             <a class=""navbar-brand"" href=""..{settings.Path}"">RedisUI</a>
             <div class=""collapse navbar-collapse"" id=""navbarSupportedContent"">
               <ul class=""navbar-nav me-auto mb-2 mb-lg-0"">
+<a class=""navbar-brand"" title=""Keys"">
+                <svg xmlns=""http://www.w3.org/2000/svg"" width=""20"" height=""20"" fill=""currentColor"" class=""bi bi-key"" viewBox=""0 0 16 16"">
+                  <path d=""M0 8a4 4 0 0 1 7.465-2H14a.5.5 0 0 1 .354.146l1.5 1.5a.5.5 0 0 1 0 .708l-1.5 1.5a.5.5 0 0 1-.708 0L13 9.207l-.646.647a.5.5 0 0 1-.708 0L11 9.207l-.646.647a.5.5 0 0 1-.708 0L9 9.207l-.646.647A.5.5 0 0 1 8 10h-.535A4 4 0 0 1 0 8m4-3a3 3 0 1 0 2.712 4.285A.5.5 0 0 1 7.163 9h.63l.853-.854a.5.5 0 0 1 .708 0l.646.647.646-.647a.5.5 0 0 1 .708 0l.646.647.646-.647a.5.5 0 0 1 .708 0l.646.647.793-.793-1-1h-6.63a.5.5 0 0 1-.451-.285A3 3 0 0 0 4 5""/>
+                  <path d=""M4 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0""/>
+                </svg>      
+                {dbSize}
+            </a>
                 <li class=""nav-item dropdown"">
                   <a id=""dblink"" class=""nav-link dropdown-toggle"" href=""#"" role=""button"" data-bs-toggle=""dropdown"" aria-expanded=""false"">
                     DB ({db})
@@ -105,14 +108,7 @@
                   </ul> 
                 </li>
               </ul>
-            </div>  
-            <a class=""navbar-brand"" title=""Keys"">
-                <svg xmlns=""http://www.w3.org/2000/svg"" width=""20"" height=""20"" fill=""currentColor"" class=""bi bi-key"" viewBox=""0 0 16 16"">
-                  <path d=""M0 8a4 4 0 0 1 7.465-2H14a.5.5 0 0 1 .354.146l1.5 1.5a.5.5 0 0 1 0 .708l-1.5 1.5a.5.5 0 0 1-.708 0L13 9.207l-.646.647a.5.5 0 0 1-.708 0L11 9.207l-.646.647a.5.5 0 0 1-.708 0L9 9.207l-.646.647A.5.5 0 0 1 8 10h-.535A4 4 0 0 1 0 8m4-3a3 3 0 1 0 2.712 4.285A.5.5 0 0 1 7.163 9h.63l.853-.854a.5.5 0 0 1 .708 0l.646.647.646-.647a.5.5 0 0 1 .708 0l.646.647.646-.647a.5.5 0 0 1 .708 0l.646.647.793-.793-1-1h-6.63a.5.5 0 0 1-.451-.285A3 3 0 0 0 4 5""/>
-                  <path d=""M4 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0""/>
-                </svg>      
-                {dbSize}
-            </a>
+            </div>            
             <a class=""navbar-brand"" title=""Statistics"" href=""..{settings.Path}/statistics"">
                 <svg xmlns=""http://www.w3.org/2000/svg"" width=""28"" height=""28"" fill=""currentColor"" class=""bi bi-speedometer2"" viewBox=""0 0 16 16"">
                   <path d=""M8 4a.5.5 0 0 1 .5.5V6a.5.5 0 0 1-1 0V4.5A.5.5 0 0 1 8 4M3.732 5.732a.5.5 0 0 1 .707 0l.915.914a.5.5 0 1 1-.708.708l-.914-.915a.5.5 0 0 1 0-.707M2 10a.5.5 0 0 1 .5-.5h1.586a.5.5 0 0 1 0 1H2.5A.5.5 0 0 1 2 10m9.5 0a.5.5 0 0 1 .5-.5h1.5a.5.5 0 0 1 0 1H12a.5.5 0 0 1-.5-.5m.754-4.246a.39.39 0 0 0-.527-.02L7.547 9.31a.91.91 0 1 0 1.302 1.258l3.434-4.297a.39.39 0 0 0-.029-.518z""/>
