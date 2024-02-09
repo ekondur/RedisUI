@@ -4,6 +4,7 @@ using StackExchange.Redis;
 using RedisUI.Pages;
 using System.Linq;
 using RedisUI.Models;
+using System.Collections.Generic;
 
 namespace RedisUI
 {
@@ -35,6 +36,24 @@ namespace RedisUI
 
                 var dbSize = await redisDb.ExecuteAsync("DBSIZE");
 
+                if (context.Request.Path.ToString() == $"{_settings.Path}/statistics")
+                {
+                    var keyspaces = new List<Keyspace>();
+
+                    var keyspace = await redisDb.ExecuteAsync("INFO", "KEYSPACE");
+
+                    foreach (var item in keyspace.ToString().Replace("# Keyspace", "").Split("\r\n"))
+                    {
+                        if (!string.IsNullOrEmpty(item))
+                        {
+                            keyspaces.Add(Keyspace.ToKeyspace(item));
+                        }
+                    }               
+
+                    await context.Response.WriteAsync(MainLayout.Build(Statistics.Build(keyspaces), dbSize.ToString(), currentDb, _settings));
+                    return;
+                }
+
                 var page = context.Request.Query["page"].ToString();
 
                 var pageSize = string.IsNullOrEmpty(context.Request.Query["size"]) ? "10" : context.Request.Query["size"].ToString();
@@ -65,7 +84,7 @@ namespace RedisUI
                     key.Value = await redisDb.StringGetAsync(key.KeyName);
                 }
 
-                await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), _settings));
+                await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), currentDb, _settings));
                 return;
             }
 

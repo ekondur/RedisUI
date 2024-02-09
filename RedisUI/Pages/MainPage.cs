@@ -32,9 +32,9 @@ namespace RedisUI.Pages
         <div class=""col-6"">
             <table class=""table table-hover"" id=""redisTable"">
                 <thead class=""sticky-top"">
-                    <tr>
-                        <th>Type</th>
-                        <th>Key</th>
+                    <tr class=""table-active"">
+                        <th scope=""col"">Type</th>
+                        <th scope=""col"">Key</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -53,7 +53,7 @@ namespace RedisUI.Pages
                 </div>
             </div>
         </div>
-    <div/>
+    </div>
 
 <script>
     
@@ -93,6 +93,7 @@ namespace RedisUI.Pages
         const nBtn = document.createElement('button');
         nBtn.innerText = {next} == 0 ? 'Back to top' : 'Next';
         nBtn.className = ""btn btn-outline-success"";
+        nBtn.id = ""btnNext"";
         nBtn.addEventListener('click', function () {{
             showPage({next}, currentDb, currentKey);
          }});
@@ -162,6 +163,8 @@ namespace RedisUI.Pages
 
     var sizeElement = document.getElementById(""size""+currentSize);
     sizeElement.classList.add(""active"");
+
+    document.getElementById(""btnNext"").hidden = '{next}' == currentPage;
 
     }});
 
