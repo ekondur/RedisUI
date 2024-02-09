@@ -16,9 +16,9 @@ namespace RedisUI.Pages
             return @$"
 <div class=""row"">
     <div class=""col-6"">
-        <table class=""table"">
+        <table class=""table table-hover"">
           <thead>
-            <tr>
+            <tr class=""table-active"">
               <th colspan=""4"">
                 <span>
                     <svg xmlns=""http://www.w3.org/2000/svg"" width=""24"" height=""24"" fill=""currentColor"" class=""bi bi-key"" viewBox=""0 0 16 16"">

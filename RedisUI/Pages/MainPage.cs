@@ -11,7 +11,7 @@ namespace RedisUI.Pages
             var tbody = new StringBuilder();
             foreach (var key in keys)
             {
-                tbody.Append($"<tr data-value='{key.Value.ToString()}'><td><span class=\"badge text-bg-secondary\">{key.KeyType}</span></td><td>{key.KeyName}</td></tr>");
+                tbody.Append($"<tr style=\"cursor: pointer;\" data-value='{key.Value.ToString()}'><td><span class=\"badge text-bg-secondary\">{key.KeyType}</span></td><td>{key.KeyName}</td></tr>");
             }
 
             var html = $@"
@@ -167,7 +167,6 @@ namespace RedisUI.Pages
     document.getElementById(""btnNext"").hidden = '{next}' == currentPage;
 
     }});
-
 
 </script>
 ";
