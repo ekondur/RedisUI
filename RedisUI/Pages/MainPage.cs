@@ -1,4 +1,5 @@
-﻿using RedisUI.Models;
+﻿using RedisUI.Helpers;
+using RedisUI.Models;
 using System.Collections.Generic;
 using System.Text;
 
@@ -11,7 +12,7 @@ namespace RedisUI.Pages
             var tbody = new StringBuilder();
             foreach (var key in keys)
             {
-                tbody.Append($"<tr style=\"cursor: pointer;\" data-value='{key.Value.ToString()}'><td><span class=\"badge text-bg-secondary\">{key.KeyType}</span></td><td>{key.KeyName}</td></tr>");
+                tbody.Append($"<tr style=\"cursor: pointer;\" data-value='{key.Value.ToString()}'><td><span class=\"badge text-bg-{key.Badge}\">{key.KeyType}</span></td><td>{key.Name}</td><td>{key.Value.Length().ToKilobytes()}</td></tr>");
             }
 
             var html = $@"
@@ -35,6 +36,7 @@ namespace RedisUI.Pages
                     <tr class=""table-active"">
                         <th scope=""col"">Type</th>
                         <th scope=""col"">Key</th>
+                        <th scope=""col"">Size(KB)</th>
                     </tr>
                 </thead>
                 <tbody>
