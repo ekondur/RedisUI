@@ -75,14 +75,39 @@ namespace RedisUI
             var keys = ((string[])innerResult[1])
                 .Select(x => new KeyModel
                 {
-                    KeyName = x
+                    Name = x
                 })
                 .ToList();
 
             foreach (var key in keys)
             {
-                key.KeyType = await redisDb.KeyTypeAsync(key.KeyName);
-                key.Value = await redisDb.StringGetAsync(key.KeyName);
+                key.KeyType = await redisDb.KeyTypeAsync(key.Name);
+                switch (key.KeyType)
+                {
+                    case RedisType.String:
+                        key.Value = await redisDb.StringGetAsync(key.Name);
+                        key.Badge = "light";
+                        break;
+                    case RedisType.Hash:
+                        var hashValue = await redisDb.HashGetAllAsync(key.Name);
+                        key.Value = string.Join(", ", hashValue.Select(x => $"{x.Name}: {x.Value}"));
+                        key.Badge = "success";
+                        break;
+                    case RedisType.List:
+                        var listValue = await redisDb.ListRangeAsync(key.Name);
+                        key.Value = string.Join(", ", listValue.Select(x => x));
+                        key.Badge = "warning";
+                        break;
+                    case RedisType.Set:
+                        var setValue = await redisDb.SetMembersAsync(key.Name);
+                        key.Value = string.Join(", ", setValue.Select(x => x));
+                        key.Badge = "primary";
+                        break;
+                    case RedisType.None:
+                        key.Value = await redisDb.StringGetAsync(key.Name);
+                        key.Badge = "secondary";
+                        break;
+                }
             }
 
             await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), currentDb, _settings));
