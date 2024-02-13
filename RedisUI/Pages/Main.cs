@@ -5,7 +5,7 @@ using System.Text;
 
 namespace RedisUI.Pages
 {
-    public static class MainPage
+    public static class Main
     {
         public static string Build(List<KeyModel> keys, long next)
         {

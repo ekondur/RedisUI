@@ -65,7 +65,7 @@ namespace RedisUI
                     AllInfo = allInfo.ToString().ToInfo()
                 };
 
-                await context.Response.WriteAsync(MainLayout.Build(Statistics.Build(model), dbSize.ToString(), currentDb, _settings));
+                await context.Response.WriteAsync(Layout.Build(Statistics.Build(model), dbSize.ToString(), currentDb, _settings));
                 return;
             }
 
@@ -125,7 +125,7 @@ namespace RedisUI
                 }
             }
 
-            await context.Response.WriteAsync(MainLayout.Build(MainPage.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), currentDb, _settings));
+            await context.Response.WriteAsync(Layout.Build(Main.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), currentDb, _settings));
         }
     }
 }
