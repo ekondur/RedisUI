@@ -17,6 +17,7 @@
         .pagination {{
             display: flex;
             justify-content: center;
+            margin-top: 5px;
         }}
 
         .table {{
