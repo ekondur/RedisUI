@@ -2,14 +2,14 @@
 
 namespace RedisUI.Models
 {
-    public class Keyspace
+    public class KeyspaceModel
     {
-        public string Db { get; set; }
-        public string Keys { get; set; }
-        public string Expires { get; set; }
-        public string Avg_Ttl { get; set; }
+        public string Db { get; private set; }
+        public string Keys { get; private set; }
+        public string Expires { get; private set; }
+        public string Avg_Ttl { get; private set; }
 
-        public static Keyspace ToKeyspace(string input)
+        public static KeyspaceModel Instance(string input)
         {
             string[] parts = input.Split(':');
             string database = parts[0].TrimStart('d', 'b');
@@ -25,7 +25,7 @@ namespace RedisUI.Models
                 attributeMap[key] = value;
             }
 
-            return new Keyspace
+            return new KeyspaceModel
             {
                 Db = database,
                 Keys = attributeMap["keys"],

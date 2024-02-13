@@ -4,6 +4,7 @@ using StackExchange.Redis;
 using RedisUI.Pages;
 using System.Linq;
 using RedisUI.Models;
+using RedisUI.Helpers;
 
 namespace RedisUI
 {
@@ -47,10 +48,24 @@ namespace RedisUI
                     .Replace("# Keyspace", "")
                     .Split("\r\n")
                     .Where(item => !string.IsNullOrEmpty(item))
-                    .Select(item => Keyspace.ToKeyspace(item))
+                    .Select(item => KeyspaceModel.Instance(item))
                     .ToList();
 
-                await context.Response.WriteAsync(MainLayout.Build(Statistics.Build(keyspaces), dbSize.ToString(), currentDb, _settings));
+                var serverInfo = await redisDb.ExecuteAsync("INFO", "SERVER");
+                var memoryInfo = await redisDb.ExecuteAsync("INFO", "MEMORY");
+                var statsInfo = await redisDb.ExecuteAsync("INFO", "STATS");
+                var allInfo = await redisDb.ExecuteAsync("INFO");
+
+                var model = new StatisticsVm
+                {
+                    Keyspaces = keyspaces,
+                    Server = ServerModel.Instance(serverInfo.ToString()),
+                    Memory = MemoryModel.Instance(memoryInfo.ToString()),
+                    Stats = StatsModel.Instance(statsInfo.ToString()),
+                    AllInfo = allInfo.ToString().ToInfo()
+                };
+
+                await context.Response.WriteAsync(MainLayout.Build(Statistics.Build(model), dbSize.ToString(), currentDb, _settings));
                 return;
             }
 

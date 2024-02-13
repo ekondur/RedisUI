@@ -31,18 +31,20 @@ namespace RedisUI.Pages
     </div>
     <div class=""row"">
         <div class=""col-6"">
-            <table class=""table table-hover"" id=""redisTable"">
-                <thead class=""sticky-top"">
-                    <tr class=""table-active"">
-                        <th scope=""col"">Type</th>
-                        <th scope=""col"">Key</th>
-                        <th scope=""col"">Size(KB)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {tbody}
-                </tbody>
-            </table>
+            <div class=""table-responsive"">
+                <table class=""table table-hover"" id=""redisTable"">
+                    <thead class=""sticky-top"">
+                        <tr class=""table-active"">
+                            <th scope=""col"">Type</th>
+                            <th scope=""col"">Key</th>
+                            <th scope=""col"">Size(KB)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {tbody}
+                    </tbody>
+                </table>
+            </div>
             <div class=""pagination"" id=""pagination"">
             </div>
         </div>
