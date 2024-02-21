@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 
 namespace RedisUI.Helpers
 {
@@ -6,7 +7,7 @@ namespace RedisUI.Helpers
     {
         public static Dictionary<string, string> ToInfo(this string input)
         {
-            string[] rows = input.Split("\r\n");
+            string[] rows = input.Split(new string[] { "\r\n" }, StringSplitOptions.None);
             var attributeMap = new Dictionary<string, string>();
 
             foreach (string row in rows)

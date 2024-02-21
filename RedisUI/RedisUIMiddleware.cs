@@ -5,6 +5,7 @@ using RedisUI.Pages;
 using System.Linq;
 using RedisUI.Models;
 using RedisUI.Helpers;
+using System;
 
 namespace RedisUI
 {
@@ -46,7 +47,7 @@ namespace RedisUI
                 var keyspaces = keyspace
                     .ToString()
                     .Replace("# Keyspace", "")
-                    .Split("\r\n")
+                    .Split(new string[] { "\r\n" }, StringSplitOptions.None)
                     .Where(item => !string.IsNullOrEmpty(item))
                     .Select(item => KeyspaceModel.Instance(item))
                     .ToList();
