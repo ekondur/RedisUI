@@ -21,7 +21,7 @@ namespace RedisUI.Pages
                 tbodyInfo.Append($"<tr><td>{info.Key}</td><td>{info.Value}</td></tr>");
             }
 
-            return @$"
+            return $@"
 <div class=""row"">
     <div class=""col-4"">
         <div class=""card border-info mb-3 sticky-top"">
