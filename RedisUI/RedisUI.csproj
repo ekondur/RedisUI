@@ -4,6 +4,22 @@
 	<TargetFrameworks>netcoreapp3.1;netcoreapp5.0;netstandard2.0</TargetFrameworks>
 	<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	  <RootNamespace>RedisUI</RootNamespace>
+	  <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+	  <Title>Redis Integrated UI</Title>
+	  <Authors>Emrah KONDUR</Authors>
+	  <Company>Emrah KONDUR</Company>
+	  <Description>Redis Integrated UI</Description>
+	  <Copyright>https://github.com/ekondur/RedisUI</Copyright>
+	  <PackageProjectUrl>https://github.com/ekondur/RedisUI</PackageProjectUrl>
+	  <PackageIcon>redisui.png</PackageIcon>
+	  <PackageReadmeFile>README.md</PackageReadmeFile>
+	  <RepositoryUrl>https://github.com/ekondur/RedisUI</RepositoryUrl>
+	  <RepositoryType>git</RepositoryType>
+	  <PackageTags>Redis,Web,UI,Client,Keys,Statistics</PackageTags>
+	  <PackageReleaseNotes>Initial</PackageReleaseNotes>
+	  <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+	  <IncludeSymbols>True</IncludeSymbols>
+	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
 	<ItemGroup Condition="'$(TargetFramework)'=='netstandard2.0'">
@@ -16,7 +32,29 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <None Include="..\LICENSE.txt">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	  <None Include="..\README.md">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	  <None Include="..\redisui.png">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="StackExchange.Redis" Version="2.2.88" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Update="redisui.png">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
 	</ItemGroup>
 	
 </Project>
