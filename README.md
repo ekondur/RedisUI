@@ -46,7 +46,7 @@ app.UseRedisUI();
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
-    Path = "myredisui",
+    Path = "/myredisui",
 });
 ```
 - The ```ConnectionString``` is "localhost" by default, set the connection string.
