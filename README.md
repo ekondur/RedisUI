@@ -13,17 +13,6 @@ Redis Integrated UI is a .NET project designed to simplify the integration of a 
 
   ![image](https://github.com/ekondur/RedisUI/assets/4971326/64000f2c-a2a7-4551-b1f8-4bdb0bbbb7f3)
 
-
-## Usage
-
-To integrate the Redis UI into your middleware application, follow these steps:
-
-1. Clone the Redis Integrated UI project repository.
-2. Incorporate the necessary project files into your middleware application.
-3. Configure the routing to include the Redis UI page ("/redis").
-4. Run your middleware application, and navigate to the "/redis" path to access the Redis UI.
-5. Start managing Redis keys and monitoring server statistics seamlessly.
-
 ## Getting Started
 
 To integrate the Redis UI into your application, follow these steps:
