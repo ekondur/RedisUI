@@ -78,7 +78,7 @@ public class MyAuthorizationFilter : IRedisAuthorizationFilter
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
-    AuthorizationFilter = new FooAuthorizationFilter(app.Environment.IsDevelopment())
+    AuthorizationFilter = new MyAuthorizationFilter(app.Environment.IsDevelopment())
 });
 ```
 ## Contributing
