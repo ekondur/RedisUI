@@ -1,4 +1,5 @@
-﻿using RedisUI.Helpers;
+﻿using RedisUI.Contents;
+using RedisUI.Helpers;
 using RedisUI.Models;
 using System.Collections.Generic;
 using System.Text;
@@ -12,7 +13,9 @@ namespace RedisUI.Pages
             var tbody = new StringBuilder();
             foreach (var key in keys)
             {
-                tbody.Append($"<tr style=\"cursor: pointer;\" data-value='{key.Value.ToString()}'><td><span class=\"badge text-bg-{key.Badge}\">{key.KeyType}</span></td><td>{key.Name}</td><td>{key.Value.Length().ToKilobytes()}</td></tr>");
+                var columns = $"<td><span class=\"badge text-bg-{key.Badge}\">{key.KeyType}</span></td><td>{key.Name}</td><td>{key.Value.Length().ToKilobytes()}</td>";
+
+                tbody.Append($"<tr style=\"cursor: pointer;\" data-value='{key.Value}'>{columns}<td><a onclick=\"confirmDelete('{key.Name}')\" class=\"btn btn-sm btn-outline-danger\"><span>{Icons.Delete}</span></a></td></tr>");
             }
 
             var html = $@"
@@ -38,6 +41,7 @@ namespace RedisUI.Pages
                             <th scope=""col"">Type</th>
                             <th scope=""col"">Key</th>
                             <th scope=""col"">Size(KB)</th>
+                            <th scope=""col"" class=""col-md-1"">#</th> 
                         </tr>
                     </thead>
                     <tbody>
@@ -171,6 +175,40 @@ namespace RedisUI.Pages
     document.getElementById(""btnNext"").hidden = '{next}' == currentPage;
 
     }});
+
+    function confirmDelete(del){{
+        if (confirm(""Are you sure to delete key '"" + del + ""' ?"") == true) 
+        {{
+            let currentSize = 10;
+            let currentKey = '';
+            let currentDb = 0;
+
+            var searchParams = new URLSearchParams(window.location.search);
+            var paramDb = searchParams.get('db');
+            var paramKey = searchParams.get('key');
+            var paramSize = searchParams.get('size');
+
+            if (paramDb) {{
+                currentDb = paramDb;
+		    }}
+
+            if (paramKey) {{
+                currentKey = paramKey;
+            }}
+
+            if (paramSize) {{
+                currentSize = paramSize;
+            }}
+
+            var currentPath = window.location.href.replace(window.location.search, '');
+
+		    newQueryString = ""&db="" + currentDb + ""&size="" + currentSize + ""&key="" + currentKey + ""&del="" + del;
+
+		    newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
+		
+            window.location = newUrl.replace('#', '');
+        }}
+    }};
 
 </script>
 ";

@@ -57,10 +57,6 @@ namespace RedisUI.Pages
             currentKey = paramKey;
         }}
 
-        if (paramSize) {{
-            currentSize = paramSize;
-        }}
-
         var currentPath = window.location.href.replace(window.location.search, '');
 
 		newQueryString = ""&db="" + currentDb + ""&size="" + size + ""&key="" + currentKey;
