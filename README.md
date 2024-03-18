@@ -7,7 +7,7 @@ Redis Integrated UI is a .NET project designed to simplify the integration of a 
 ## Features
 
 - **Integration Ease**: Simplifies the process of integrating a Redis UI page into web applications.
-- **Redis Key Management**: Provides functionality to interact with Redis keys conveniently. (Read-only for now)
+- **Redis Key Management**: Provides functionality to interact with Redis keys conveniently. (list and delete for now)
   
   ![image](https://github.com/ekondur/RedisUI/assets/4971326/ecf7fa49-75ef-4704-a5b1-ad0ff2413f62)
 
