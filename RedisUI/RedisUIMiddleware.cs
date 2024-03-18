@@ -77,6 +77,13 @@ namespace RedisUI
 
             var searchKey = context.Request.Query["key"].ToString();
 
+            var delKey = context.Request.Query["del"].ToString();
+
+            if (!string.IsNullOrEmpty(delKey))
+            {
+                await redisDb.ExecuteAsync("DEL", delKey);
+            }
+
             RedisResult result;
             if (string.IsNullOrEmpty(searchKey))
             {
