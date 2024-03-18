@@ -4,6 +4,8 @@
 
 Redis Integrated UI is a .NET project designed to simplify the integration of a Redis User Interface (UI) page into your web applications. With this project, users can easily incorporate a Redis UI page, enabling them to interact with Redis keys and view Redis server statistics seamlessly.
 
+[Get it from Visual Studio Market Place](https://marketplace.visualstudio.com/items?itemName=ekondur.AI-Studio)
+
 ## Features
 
 - **Integration Ease**: Simplifies the process of integrating a Redis UI page into web applications.
