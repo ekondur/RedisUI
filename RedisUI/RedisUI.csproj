@@ -16,10 +16,11 @@
 	  <RepositoryUrl>https://github.com/ekondur/RedisUI</RepositoryUrl>
 	  <RepositoryType>git</RepositoryType>
 	  <PackageTags>Redis,Web,UI,Client,Keys,Statistics</PackageTags>
-	  <PackageReleaseNotes>Initial</PackageReleaseNotes>
+	  <PackageReleaseNotes>Added Key Deletion</PackageReleaseNotes>
 	  <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 	  <IncludeSymbols>True</IncludeSymbols>
 	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+	  <Version>1.1.0</Version>
   </PropertyGroup>
 
 	<ItemGroup Condition="'$(TargetFramework)'=='netstandard2.0'">
