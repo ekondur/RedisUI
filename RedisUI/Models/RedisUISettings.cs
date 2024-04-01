@@ -1,4 +1,6 @@
-﻿namespace RedisUI
+﻿using StackExchange.Redis;
+
+namespace RedisUI
 {
     public class RedisUISettings
     {
@@ -6,6 +8,11 @@
         /// Gets or sets the connection string for the Redis server.
         /// </summary>
         public string ConnectionString { get; set; } = "localhost";
+
+        /// <summary>
+        /// Gets or sets the ConfigurationOptions instance.
+        /// </summary>
+        public ConfigurationOptions ConfigurationOptions { get; set; }
 
         /// <summary>
         /// Gets or sets the path for the Redis server.
