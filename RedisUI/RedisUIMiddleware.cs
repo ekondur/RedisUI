@@ -37,7 +37,16 @@ namespace RedisUI
             var db = context.Request.Query["db"].ToString();
             int currentDb = string.IsNullOrEmpty(db) ? 0 : int.Parse(db);
 
-            IDatabase redisDb = ConnectionMultiplexer.Connect(_settings.ConnectionString).GetDatabase(currentDb);
+            IDatabase redisDb;
+            
+            if (_settings.ConfigurationOptions != null)
+            {
+                redisDb = ConnectionMultiplexer.Connect(_settings.ConfigurationOptions).GetDatabase(currentDb);
+            }
+            else
+            {
+                redisDb = ConnectionMultiplexer.Connect(_settings.ConnectionString).GetDatabase(currentDb);
+            }    
 
             var dbSize = await redisDb.ExecuteAsync("DBSIZE");
 

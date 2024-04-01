@@ -1,5 +1,6 @@
 using IUTest;
 using RedisUI;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,9 +23,15 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
+ConfigurationOptions options = new ConfigurationOptions
+{
+    EndPoints = { { "localhost", 6379 } },
+};
+
 app.UseRedisUI(new RedisUISettings
 {
-    AuthorizationFilter = new FooAuthorizationFilter(app.Environment.IsDevelopment())
+    AuthorizationFilter = new FooAuthorizationFilter(app.Environment.IsDevelopment()),
+    //ConfigurationOptions = options
 });
 
 app.UseAuthorization();
