@@ -47,6 +47,25 @@ app.UseRedisUI(new RedisUISettings
     ConnectionString = "1.1.1.1:6379",
 });
 ```
+- Use ```ConfigurationOptions``` for detailed settings.
+
+```csharp
+ConfigurationOptions options = new ConfigurationOptions
+{
+    EndPoints = { { "my-redis.cloud.redislabs.com", 6379 } },
+    User = "default",  // use your Redis user. More info https://redis.io/docs/management/security/acl/
+    Password = "secret", // use your Redis password
+    Ssl = true,
+    SslProtocols = System.Security.Authentication.SslProtocols.Tls12                
+};
+```
+```csharp
+app.UseRedisUI(new RedisUISettings
+{
+    ConfigurationOptions = options
+});
+```
+
 - The UI is using Bootstrap 5.3.2 version from [CDN](https://getbootstrap.com/), you can get it from locally via setting properties below:
 ```csharp
 app.UseRedisUI(new RedisUISettings
