@@ -182,11 +182,13 @@ namespace RedisUI.Pages
             let currentSize = 10;
             let currentKey = '';
             let currentDb = 0;
+            let currentPage = 0;
 
             var searchParams = new URLSearchParams(window.location.search);
             var paramDb = searchParams.get('db');
             var paramKey = searchParams.get('key');
             var paramSize = searchParams.get('size');
+		    var paramPage = searchParams.get('page');
 
             if (paramDb) {{
                 currentDb = paramDb;
@@ -200,13 +202,28 @@ namespace RedisUI.Pages
                 currentSize = paramSize;
             }}
 
+            if (paramPage) {{
+                currentPage = paramPage;
+		    }}
+
             var currentPath = window.location.href.replace(window.location.search, '');
 
-		    newQueryString = ""&db="" + currentDb + ""&size="" + currentSize + ""&key="" + currentKey + ""&del="" + del;
+		    newQueryString = ""&db="" + currentDb + ""&size="" + currentSize + ""&key="" + currentKey + ""&page="" + currentPage;
 
 		    newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
-		
-            window.location = newUrl.replace('#', '');
+
+            fetch(newUrl, {{
+              method: 'POST',
+              body: JSON.stringify({{
+                DelKey: del,
+              }}),
+              headers: {{
+                'Content-type': 'application/json; charset=UTF-8'
+              }}
+            }})
+            .then(function(response) {{
+                window.location = newUrl.replace('#', '');
+            }});
         }}
     }};
 
