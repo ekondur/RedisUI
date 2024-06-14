@@ -16,11 +16,11 @@
 	  <RepositoryUrl>https://github.com/ekondur/RedisUI</RepositoryUrl>
 	  <RepositoryType>git</RepositoryType>
 	  <PackageTags>Redis,Web,UI,Client,Keys,Statistics</PackageTags>
-	  <PackageReleaseNotes>Removed deprecated frameworks</PackageReleaseNotes>
+	  <PackageReleaseNotes>Fixed Delete Issue</PackageReleaseNotes>
 	  <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 	  <IncludeSymbols>True</IncludeSymbols>
 	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-	  <Version>1.3.0</Version>
+	  <Version>1.3.1</Version>
   </PropertyGroup>
 
 	<ItemGroup>
