@@ -6,6 +6,8 @@ using System.Linq;
 using RedisUI.Models;
 using RedisUI.Helpers;
 using System;
+using System.IO;
+using System.Text.Json;
 
 namespace RedisUI
 {
@@ -50,17 +52,24 @@ namespace RedisUI
 
             var dbSize = await redisDb.ExecuteAsync("DBSIZE");
 
+            var keyspace = await redisDb.ExecuteAsync("INFO", "KEYSPACE");
+            var keyspaces = keyspace
+                .ToString()
+                .Replace("# Keyspace", "")
+                .Split(new string[] { "\r\n" }, StringSplitOptions.None)
+                .Where(item => !string.IsNullOrEmpty(item))
+                .Select(KeyspaceModel.Instance)
+                .ToList();
+
+            var layoutModel = new LayoutModel
+            {
+                DbList = keyspaces.Select(x => x.Db).ToList(),
+                CurrentDb = currentDb,
+                DbSize = dbSize.ToString()
+            };
+
             if (context.Request.Path.ToString() == $"{_settings.Path}/statistics")
             {
-                var keyspace = await redisDb.ExecuteAsync("INFO", "KEYSPACE");
-                var keyspaces = keyspace
-                    .ToString()
-                    .Replace("# Keyspace", "")
-                    .Split(new string[] { "\r\n" }, StringSplitOptions.None)
-                    .Where(item => !string.IsNullOrEmpty(item))
-                    .Select(item => KeyspaceModel.Instance(item))
-                    .ToList();
-
                 var serverInfo = await redisDb.ExecuteAsync("INFO", "SERVER");
                 var memoryInfo = await redisDb.ExecuteAsync("INFO", "MEMORY");
                 var statsInfo = await redisDb.ExecuteAsync("INFO", "STATS");
@@ -75,7 +84,9 @@ namespace RedisUI
                     AllInfo = allInfo.ToString().ToInfo()
                 };
 
-                await context.Response.WriteAsync(Layout.Build(Statistics.Build(model), dbSize.ToString(), currentDb, _settings));
+                layoutModel.Section = Statistics.Build(model);
+
+                await context.Response.WriteAsync(Layout.Build(layoutModel, _settings));
                 return;
             }
 
@@ -86,11 +97,21 @@ namespace RedisUI
 
             var searchKey = context.Request.Query["key"].ToString();
 
-            var delKey = context.Request.Query["del"].ToString();
-
-            if (!string.IsNullOrEmpty(delKey))
+            context.Request.EnableBuffering();
+            context.Request.Body.Seek(0, SeekOrigin.Begin);
+            using (var stream = new StreamReader(context.Request.Body))
             {
-                await redisDb.ExecuteAsync("DEL", delKey);
+                string body = await stream.ReadToEndAsync();
+
+                if (!string.IsNullOrEmpty(body))
+                {
+                    var postModel = JsonSerializer.Deserialize<PostModel>(body);
+
+                    if (postModel != null)
+                    {
+                        await redisDb.ExecuteAsync("DEL", postModel.DelKey);
+                    }
+                }
             }
 
             RedisResult result;
@@ -142,7 +163,9 @@ namespace RedisUI
                 }
             }
 
-            await context.Response.WriteAsync(Layout.Build(Main.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0), dbSize.ToString(), currentDb, _settings));
+            layoutModel.Section = Main.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0);
+
+            await context.Response.WriteAsync(Layout.Build(layoutModel, _settings));
         }
     }
 }

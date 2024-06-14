@@ -1,11 +1,19 @@
 ﻿using RedisUI.Contents;
+using RedisUI.Models;
+using System.Text;
 
 namespace RedisUI.Pages
 {
     public static class Layout
     {
-        public static string Build(string section, string dbSize, int db, RedisUISettings settings)
+        public static string Build(LayoutModel model, RedisUISettings settings)
         {
+            var dbList = new StringBuilder();
+            foreach (var item in model.DbList)
+            {
+                dbList.Append($"<li><a class=\"dropdown-item\" id=\"nav{item}\" href=\"javascript:setdb({item});\">{item}</a></li>");
+            }
+
             return $@"<!DOCTYPE html>
 <html lang=""en"">
 <head>
@@ -78,29 +86,14 @@ namespace RedisUI.Pages
               <ul class=""navbar-nav me-auto mb-2 mb-lg-0"">
                 <a class=""navbar-brand"" title=""Keys"">
                     {Icons.KeyLg}      
-                    {dbSize}
+                    {model.DbSize}
                 </a>
                 <li class=""nav-item dropdown"">
                   <a id=""dblink"" class=""nav-link dropdown-toggle"" href=""#"" role=""button"" data-bs-toggle=""dropdown"" aria-expanded=""false"">
-                    DB ({db})
+                    DB ({model.CurrentDb})
                   </a>
                   <ul class=""dropdown-menu"">
-                    <li><a class=""dropdown-item"" id=""nav0"" href=""javascript:setdb(0);"">0</a></li>
-                    <li><a class=""dropdown-item"" id=""nav1"" href=""javascript:setdb(1);"">1</a></li>
-                    <li><a class=""dropdown-item"" id=""nav2"" href=""javascript:setdb(2);"">2</a></li>
-                    <li><a class=""dropdown-item"" id=""nav3"" href=""javascript:setdb(3);"">3</a></li>
-                    <li><a class=""dropdown-item"" id=""nav4"" href=""javascript:setdb(4);"">4</a></li>
-                    <li><a class=""dropdown-item"" id=""nav5"" href=""javascript:setdb(5);"">5</a></li>
-                    <li><a class=""dropdown-item"" id=""nav6"" href=""javascript:setdb(6);"">6</a></li>
-                    <li><a class=""dropdown-item"" id=""nav7"" href=""javascript:setdb(7);"">7</a></li>
-                    <li><a class=""dropdown-item"" id=""nav8"" href=""javascript:setdb(8);"">8</a></li>
-                    <li><a class=""dropdown-item"" id=""nav9"" href=""javascript:setdb(9);"">9</a></li>
-                    <li><a class=""dropdown-item"" id=""nav10"" href=""javascript:setdb(10);"">10</a></li>
-                    <li><a class=""dropdown-item"" id=""nav11"" href=""javascript:setdb(11);"">11</a></li>
-                    <li><a class=""dropdown-item"" id=""nav12"" href=""javascript:setdb(12);"">12</a></li>
-                    <li><a class=""dropdown-item"" id=""nav13"" href=""javascript:setdb(13);"">13</a></li>
-                    <li><a class=""dropdown-item"" id=""nav14"" href=""javascript:setdb(14);"">14</a></li>
-                    <li><a class=""dropdown-item"" id=""nav15"" href=""javascript:setdb(15);"">15</a></li>
+                    {dbList}
                   </ul> 
                 </li>
               </ul>
@@ -113,7 +106,7 @@ namespace RedisUI.Pages
 
     <div class=""container"">
         <br/>
-            {section}
+            {model.Section}
     </div>
 
     <div class=""container"">
@@ -127,7 +120,6 @@ namespace RedisUI.Pages
 </body>
 </html>
 ";
-
 
         }
     }
