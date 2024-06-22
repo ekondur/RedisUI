@@ -19,9 +19,15 @@ namespace RedisUI.Pages
             }
 
             var html = $@"
+    {InsertModal.Build()}
     <div class=""row"">
         <div class=""col-6""><div id=""search"" class=""input-group mb-3""></div></div>
-        <div class=""col-6"">
+        <div class=""col-1"">
+            <button type=""button"" class=""btn btn-outline-success"" data-bs-toggle=""modal"" data-bs-target=""#insertModal"" title=""Add or Edit Key"">
+              {Icons.KeyLg}
+            </button>
+        </div>
+        <div class=""col-5"">
             <ul class=""pagination"">
                 <li class=""page-item"" id=""size10""><a class=""page-link"" href=""javascript:setSize(10);"">10</a></li>
                 <li class=""page-item"" id=""size20""><a class=""page-link"" href=""javascript:setSize(20);"">20</a></li>
@@ -30,7 +36,7 @@ namespace RedisUI.Pages
                 <li class=""page-item"" id=""size500""><a class=""page-link"" href=""javascript:setSize(500);"">500</a></li>
                 <li class=""page-item"" id=""size1000""><a class=""page-link"" href=""javascript:setSize(1000);"">1000</a></li>
             </ul>
-        </div> 
+        </div>
     </div>
     <div class=""row"">
         <div class=""col-6"">
@@ -176,42 +182,42 @@ namespace RedisUI.Pages
 
     }});
 
+    let currentSize = 10;
+    let currentKey = '';
+    let currentDb = 0;
+    let currentPage = 0;
+
+    var searchParams = new URLSearchParams(window.location.search);
+    var paramDb = searchParams.get('db');
+    var paramKey = searchParams.get('key');
+    var paramSize = searchParams.get('size');
+	var paramPage = searchParams.get('page');
+
+    if (paramDb) {{
+        currentDb = paramDb;
+	}}
+
+    if (paramKey) {{
+        currentKey = paramKey;
+    }}
+
+    if (paramSize) {{
+        currentSize = paramSize;
+    }}
+
+    if (paramPage) {{
+        currentPage = paramPage;
+	}}
+
+    var currentPath = window.location.href.replace(window.location.search, '');
+
+	newQueryString = ""&db="" + currentDb + ""&size="" + currentSize + ""&key="" + currentKey + ""&page="" + currentPage;
+
+	newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
+
     function confirmDelete(del){{
         if (confirm(""Are you sure to delete key '"" + del + ""' ?"") == true) 
         {{
-            let currentSize = 10;
-            let currentKey = '';
-            let currentDb = 0;
-            let currentPage = 0;
-
-            var searchParams = new URLSearchParams(window.location.search);
-            var paramDb = searchParams.get('db');
-            var paramKey = searchParams.get('key');
-            var paramSize = searchParams.get('size');
-		    var paramPage = searchParams.get('page');
-
-            if (paramDb) {{
-                currentDb = paramDb;
-		    }}
-
-            if (paramKey) {{
-                currentKey = paramKey;
-            }}
-
-            if (paramSize) {{
-                currentSize = paramSize;
-            }}
-
-            if (paramPage) {{
-                currentPage = paramPage;
-		    }}
-
-            var currentPath = window.location.href.replace(window.location.search, '');
-
-		    newQueryString = ""&db="" + currentDb + ""&size="" + currentSize + ""&key="" + currentKey + ""&page="" + currentPage;
-
-		    newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
-
             fetch(newUrl, {{
               method: 'POST',
               body: JSON.stringify({{
@@ -220,12 +226,38 @@ namespace RedisUI.Pages
               headers: {{
                 'Content-type': 'application/json; charset=UTF-8'
               }}
-            }})
-            .then(function(response) {{
+            }}).then(function(response) {{
                 window.location = newUrl.replace('#', '');
             }});
         }}
     }};
+
+    function saveKey(){{
+        fetch(newUrl, {{
+          method: 'POST',
+          body: JSON.stringify({{
+            InsertKey: document.getElementById(""insertKey"").value,
+            InsertValue: document.getElementById(""insertValue"").value
+          }}),
+          headers: {{
+            'Content-type': 'application/json; charset=UTF-8'
+          }}
+        }}).then(function(response) {{
+            window.location = newUrl.replace('#', '');
+        }});
+    }}
+
+    function checkRequired(){{
+        var insertKey = document.getElementById(""insertKey"").value;
+        var insertValue = document.getElementById(""insertValue"").value;
+
+        if (insertKey && insertValue){{
+            document.getElementById(""btnSave"").disabled = false;
+        }}
+        else{{
+            document.getElementById(""btnSave"").disabled = true;
+        }}
+    }}
 
 </script>
 ";

@@ -109,7 +109,16 @@ namespace RedisUI
 
                     if (postModel != null)
                     {
-                        await redisDb.ExecuteAsync("DEL", postModel.DelKey);
+                        if (!string.IsNullOrEmpty(postModel.DelKey))
+                        {
+                            await redisDb.ExecuteAsync("DEL", postModel.DelKey);
+                        }
+
+                        if (!string.IsNullOrEmpty(postModel.InsertKey) 
+                            && !string.IsNullOrEmpty(postModel.InsertValue))
+                        {
+                            await redisDb.ExecuteAsync("SET", postModel.InsertKey, postModel.InsertValue);
+                        }
                     }
                 }
             }
