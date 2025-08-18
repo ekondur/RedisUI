@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-	<TargetFrameworks>netcoreapp6.0;netcoreapp7.0;netcoreapp8.0</TargetFrameworks>
+	<TargetFrameworks>net8.0;net9.0</TargetFrameworks>
 	<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	  <RootNamespace>RedisUI</RootNamespace>
 	  <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
@@ -16,11 +16,11 @@
 	  <RepositoryUrl>https://github.com/ekondur/RedisUI</RepositoryUrl>
 	  <RepositoryType>git</RepositoryType>
 	  <PackageTags>Redis,Web,UI,Client,Keys,Statistics</PackageTags>
-	  <PackageReleaseNotes>Add or Edit Key Feature</PackageReleaseNotes>
+	  <PackageReleaseNotes>Support .net9, upgrade packages</PackageReleaseNotes>
 	  <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 	  <IncludeSymbols>True</IncludeSymbols>
 	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-	  <Version>1.4.0</Version>
+	  <Version>1.5.0</Version>
   </PropertyGroup>
 
 	<ItemGroup>
@@ -43,7 +43,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
 		<PackageReference Include="StackExchange.Redis" Version="2.7.10" />
+		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
