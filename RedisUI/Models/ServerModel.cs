@@ -1,12 +1,14 @@
-﻿using RedisUI.Helpers;
+using RedisUI.Helpers;
 
 namespace RedisUI.Models
 {
     public class ServerModel
     {
-        public string RedisVersion { get; private set; }
-        public string RedisMode { get; private set; }
-        public string TcpPort { get; private set; }
+        public string RedisVersion { get; private set; } = string.Empty;
+
+        public string RedisMode { get; private set; } = string.Empty;
+
+        public string TcpPort { get; private set; } = string.Empty;
 
         public static ServerModel Instance(string input)
         {
@@ -14,9 +16,9 @@ namespace RedisUI.Models
 
             return new ServerModel
             {
-                RedisVersion = info["redis_version"],
-                RedisMode = info["redis_mode"],
-                TcpPort = info["tcp_port"]
+                RedisVersion = info.TryGetValue("redis_version", out var redisVersion) ? redisVersion : string.Empty,
+                RedisMode = info.TryGetValue("redis_mode", out var redisMode) ? redisMode : string.Empty,
+                TcpPort = info.TryGetValue("tcp_port", out var tcpPort) ? tcpPort : string.Empty
             };
         }
     }

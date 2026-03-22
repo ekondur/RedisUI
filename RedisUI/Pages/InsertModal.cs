@@ -1,11 +1,9 @@
-﻿namespace RedisUI.Pages
+namespace RedisUI.Pages
 {
     public static class InsertModal
     {
-        public static string Build()
-        {
-
-            return $@"
+        public static string Build() =>
+            @"
 <div class=""modal fade"" id=""insertModal"" tabindex=""-1"" aria-labelledby=""insertModalLabel"" aria-hidden=""true"">
   <div class=""modal-dialog"">
     <div class=""modal-content"">
@@ -15,19 +13,18 @@
       </div>
       <div class=""modal-body"">
         <div class=""mb-3"">
-          <input type=""text"" class=""form-control"" id=""insertKey"" placeholder=""Key"" onkeyup=""checkRequired()"">
+          <input type=""text"" class=""form-control"" id=""insertKey"" placeholder=""Key"">
         </div>
         <div class=""mb-3"">
-          <textarea rows=""10"" type=""text"" class=""form-control"" id=""insertValue"" placeholder=""Value"" onkeyup=""checkRequired()""></textarea>
+          <textarea rows=""10"" class=""form-control"" id=""insertValue"" placeholder=""Value""></textarea>
         </div>
       </div>
       <div class=""modal-footer"">
         <button type=""button"" class=""btn btn-secondary"" data-bs-dismiss=""modal"">Close</button>
-        <button type=""button"" class=""btn btn-primary"" onclick=""saveKey()"" id=""btnSave"" disabled>Save</button>
+        <button type=""button"" class=""btn btn-primary"" id=""btnSave"" disabled>Save</button>
       </div>
     </div>
   </div>
 </div>";
-        }
     }
 }

@@ -1,180 +1,308 @@
-﻿using Microsoft.AspNetCore.Http;
-using System.Threading.Tasks;
-using StackExchange.Redis;
-using RedisUI.Pages;
-using System.Linq;
-using RedisUI.Models;
-using RedisUI.Helpers;
 using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using RedisUI.Infra;
+using RedisUI.Models;
+using RedisUI.Pages;
 
 namespace RedisUI
 {
-    public class RedisUIMiddleware
+    public class RedisUIMiddleware : IDisposable
     {
+        private const int DefaultPageSize = 10;
         private readonly RequestDelegate _next;
         private readonly RedisUISettings _settings;
+        private readonly IRedisUIDataProvider _dataProvider;
+        private readonly bool _ownsDataProvider;
+        private readonly PathString _basePath;
 
         public RedisUIMiddleware(RequestDelegate next, RedisUISettings settings)
         {
             _next = next;
-            _settings = settings;
+            _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _basePath = new PathString(NormalizePath(_settings.Path));
+            _settings.Path = _basePath.Value ?? "/redis";
+
+            if (_settings.DataProvider != null)
+            {
+                _dataProvider = _settings.DataProvider;
+                _ownsDataProvider = false;
+            }
+            else
+            {
+                _dataProvider = new RedisUIDataProvider(_settings);
+                _ownsDataProvider = true;
+            }
         }
 
         public async Task InvokeAsync(HttpContext context)
         {
-            if (!context.Request.Path.ToString().StartsWith(_settings.Path))
+            if (!context.Request.Path.StartsWithSegments(_basePath, out var remainingPath))
             {
                 await _next(context);
                 return;
             }
 
+            var subPath = remainingPath.Value?.TrimEnd('/') ?? string.Empty;
+            if (subPath.Length > 0 && !string.Equals(subPath, "/statistics", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
             if (_settings.AuthorizationFilter != null && !_settings.AuthorizationFilter.Authorize(context))
             {
-                context.Response.StatusCode = 403;
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
             }
 
-            var db = context.Request.Query["db"].ToString();
-            int currentDb = string.IsNullOrEmpty(db) ? 0 : int.Parse(db);
-
-            IDatabase redisDb;
-            
-            if (_settings.ConfigurationOptions != null)
+            if (!HttpMethods.IsGet(context.Request.Method) &&
+                !HttpMethods.IsHead(context.Request.Method) &&
+                !HttpMethods.IsPost(context.Request.Method))
             {
-                redisDb = ConnectionMultiplexer.Connect(_settings.ConfigurationOptions).GetDatabase(currentDb);
+                context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+                context.Response.Headers.Allow = "GET, HEAD, POST";
+                return;
             }
-            else
+
+            if (!TryParseInt(context.Request.Query["db"].ToString(), 0, out var currentDb))
             {
-                redisDb = ConnectionMultiplexer.Connect(_settings.ConnectionString).GetDatabase(currentDb);
-            }    
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'db' query parameter.");
+                return;
+            }
 
-            var dbSize = await redisDb.ExecuteAsync("DBSIZE");
+            if (!TryParseLong(context.Request.Query["page"].ToString(), 0, out var cursor))
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'page' query parameter.");
+                return;
+            }
 
-            var keyspace = await redisDb.ExecuteAsync("INFO", "KEYSPACE");
-            var keyspaces = keyspace
-                .ToString()
-                .Replace("# Keyspace", "")
-                .Split(new string[] { "\r\n" }, StringSplitOptions.None)
-                .Where(item => !string.IsNullOrEmpty(item))
-                .Select(KeyspaceModel.Instance)
-                .ToList();
+            if (!TryParsePageSize(context.Request.Query["size"].ToString(), out var pageSize))
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'size' query parameter.");
+                return;
+            }
 
+            if (HttpMethods.IsPost(context.Request.Method))
+            {
+                if (!IsJsonRequest(context.Request.ContentType))
+                {
+                    await WritePlainTextAsync(context, StatusCodes.Status415UnsupportedMediaType, "RedisUI mutations require 'application/json'.");
+                    return;
+                }
+
+                if (!ValidateAntiForgeryToken(context))
+                {
+                    await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid CSRF token.");
+                    return;
+                }
+
+                if (!await TryHandleMutationAsync(context, currentDb).ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
+                return;
+            }
+
+            var antiForgeryToken = EnsureAntiForgeryToken(context);
+            var keyspaces = await _dataProvider.GetKeyspacesAsync(context.RequestAborted).ConfigureAwait(false);
             var layoutModel = new LayoutModel
             {
-                DbList = keyspaces.Select(x => x.Db).ToList(),
+                DbList = new System.Collections.Generic.List<string>(System.Linq.Enumerable.Select(keyspaces, x => x.Db)),
                 CurrentDb = currentDb,
-                DbSize = dbSize.ToString()
+                DbSize = await _dataProvider.GetDatabaseSizeAsync(currentDb, context.RequestAborted).ConfigureAwait(false),
+                AntiForgeryToken = antiForgeryToken
             };
 
-            if (context.Request.Path.ToString() == $"{_settings.Path}/statistics")
+            if (string.Equals(subPath, "/statistics", StringComparison.OrdinalIgnoreCase))
             {
-                var serverInfo = await redisDb.ExecuteAsync("INFO", "SERVER");
-                var memoryInfo = await redisDb.ExecuteAsync("INFO", "MEMORY");
-                var statsInfo = await redisDb.ExecuteAsync("INFO", "STATS");
-                var allInfo = await redisDb.ExecuteAsync("INFO");
-
-                var model = new StatisticsVm
-                {
-                    Keyspaces = keyspaces,
-                    Server = ServerModel.Instance(serverInfo.ToString()),
-                    Memory = MemoryModel.Instance(memoryInfo.ToString()),
-                    Stats = StatsModel.Instance(statsInfo.ToString()),
-                    AllInfo = allInfo.ToString().ToInfo()
-                };
-
-                layoutModel.Section = Statistics.Build(model);
-
-                await context.Response.WriteAsync(Layout.Build(layoutModel, _settings));
+                var statistics = await _dataProvider.GetStatisticsAsync(context.RequestAborted).ConfigureAwait(false);
+                statistics.Keyspaces = new System.Collections.Generic.List<KeyspaceModel>(keyspaces);
+                layoutModel.Section = Statistics.Build(statistics);
+                await WriteHtmlAsync(context, Layout.Build(layoutModel, _settings)).ConfigureAwait(false);
                 return;
             }
 
-            var page = context.Request.Query["page"].ToString();
-            long cursor = string.IsNullOrEmpty(page) ? 0 : long.Parse(page);
-
-            var pageSize = context.Request.Query.TryGetValue("size", out var size) ? size.ToString() : "10";
-
             var searchKey = context.Request.Query["key"].ToString();
+            var keyPage = await _dataProvider.GetKeysAsync(currentDb, cursor, pageSize, searchKey, context.RequestAborted).ConfigureAwait(false);
 
+            layoutModel.Section = Main.Build(keyPage.Keys, keyPage.NextCursor);
+            await WriteHtmlAsync(context, Layout.Build(layoutModel, _settings)).ConfigureAwait(false);
+        }
+
+        public void Dispose()
+        {
+            if (_ownsDataProvider)
+            {
+                _dataProvider.Dispose();
+            }
+        }
+
+        private static bool IsJsonRequest(string? contentType) =>
+            !string.IsNullOrWhiteSpace(contentType) &&
+            contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return "/redis";
+            }
+
+            var normalized = path.StartsWith('/') ? path : "/" + path;
+            return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
+        }
+
+        private static bool TryParseInt(string? value, int defaultValue, out int result)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                result = defaultValue;
+                return true;
+            }
+
+            return int.TryParse(value, out result) && result >= 0;
+        }
+
+        private static bool TryParseLong(string? value, long defaultValue, out long result)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                result = defaultValue;
+                return true;
+            }
+
+            return long.TryParse(value, out result) && result >= 0;
+        }
+
+        private bool TryParsePageSize(string? value, out int pageSize)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                pageSize = DefaultPageSize;
+                return true;
+            }
+
+            if (int.TryParse(value, out pageSize) && pageSize > 0 && pageSize <= Math.Max(1, _settings.MaxPageSize))
+            {
+                return true;
+            }
+
+            pageSize = 0;
+            return false;
+        }
+
+        private string EnsureAntiForgeryToken(HttpContext context)
+        {
+            if (!context.Request.Cookies.TryGetValue(_settings.AntiForgeryCookieName, out var antiForgeryToken) || string.IsNullOrWhiteSpace(antiForgeryToken))
+            {
+                antiForgeryToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            }
+
+            context.Response.Cookies.Append(
+                _settings.AntiForgeryCookieName,
+                antiForgeryToken,
+                new CookieOptions
+                {
+                    HttpOnly = true,
+                    IsEssential = true,
+                    SameSite = SameSiteMode.Strict,
+                    Secure = context.Request.IsHttps,
+                    Path = _basePath.Value
+                });
+
+            return antiForgeryToken;
+        }
+
+        private bool ValidateAntiForgeryToken(HttpContext context)
+        {
+            if (!context.Request.Cookies.TryGetValue(_settings.AntiForgeryCookieName, out var cookieToken) || string.IsNullOrWhiteSpace(cookieToken))
+            {
+                return false;
+            }
+
+            if (!context.Request.Headers.TryGetValue(_settings.AntiForgeryHeaderName, out var headerToken) || string.IsNullOrWhiteSpace(headerToken))
+            {
+                return false;
+            }
+
+            var cookieBytes = Encoding.UTF8.GetBytes(cookieToken);
+            var headerBytes = Encoding.UTF8.GetBytes(headerToken.ToString());
+
+            return cookieBytes.Length == headerBytes.Length &&
+                   CryptographicOperations.FixedTimeEquals(cookieBytes, headerBytes);
+        }
+
+        private async Task<bool> TryHandleMutationAsync(HttpContext context, int currentDb)
+        {
             context.Request.EnableBuffering();
             context.Request.Body.Seek(0, SeekOrigin.Begin);
-            using (var stream = new StreamReader(context.Request.Body))
+
+            using var stream = new StreamReader(context.Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
+            var body = await stream.ReadToEndAsync().ConfigureAwait(false);
+            context.Request.Body.Seek(0, SeekOrigin.Begin);
+
+            if (string.IsNullOrWhiteSpace(body))
             {
-                string body = await stream.ReadToEndAsync();
-
-                if (!string.IsNullOrEmpty(body))
-                {
-                    var postModel = JsonSerializer.Deserialize<PostModel>(body);
-
-                    if (postModel != null)
-                    {
-                        if (!string.IsNullOrEmpty(postModel.DelKey))
-                        {
-                            await redisDb.ExecuteAsync("DEL", postModel.DelKey);
-                        }
-
-                        if (!string.IsNullOrEmpty(postModel.InsertKey) 
-                            && !string.IsNullOrEmpty(postModel.InsertValue))
-                        {
-                            await redisDb.ExecuteAsync("SET", postModel.InsertKey, postModel.InsertValue);
-                        }
-                    }
-                }
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Request body is required.").ConfigureAwait(false);
+                return false;
             }
 
-            RedisResult result;
-            if (string.IsNullOrEmpty(searchKey))
+            PostModel? postModel;
+            try
             {
-                result = await redisDb.ExecuteAsync("SCAN", cursor.ToString(), "COUNT", pageSize.ToString());
+                postModel = JsonSerializer.Deserialize<PostModel>(body);
             }
-            else
+            catch (JsonException)
             {
-                result = await redisDb.ExecuteAsync("SCAN", cursor.ToString(), "MATCH", searchKey, "COUNT", pageSize.ToString());
-            }
-
-            var innerResult = (RedisResult[])result;
-            var keys = ((string[])innerResult[1])
-                .Select(x => new KeyModel
-                {
-                    Name = x
-                })
-                .ToList();
-
-            foreach (var key in keys)
-            {
-                key.KeyType = await redisDb.KeyTypeAsync(key.Name);
-                switch (key.KeyType)
-                {
-                    case RedisType.String:
-                        key.Value = await redisDb.StringGetAsync(key.Name);
-                        key.Badge = "light";
-                        break;
-                    case RedisType.Hash:
-                        var hashValue = await redisDb.HashGetAllAsync(key.Name);
-                        key.Value = string.Join(", ", hashValue.Select(x => $"{x.Name}: {x.Value}"));
-                        key.Badge = "success";
-                        break;
-                    case RedisType.List:
-                        var listValue = await redisDb.ListRangeAsync(key.Name);
-                        key.Value = string.Join(", ", listValue.Select(x => x));
-                        key.Badge = "warning";
-                        break;
-                    case RedisType.Set:
-                        var setValue = await redisDb.SetMembersAsync(key.Name);
-                        key.Value = string.Join(", ", setValue.Select(x => x));
-                        key.Badge = "primary";
-                        break;
-                    case RedisType.None:
-                        key.Value = await redisDb.StringGetAsync(key.Name);
-                        key.Badge = "secondary";
-                        break;
-                }
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Request body was not valid JSON.").ConfigureAwait(false);
+                return false;
             }
 
-            layoutModel.Section = Main.Build(keys, keys.Count > 0 ? long.Parse((string)innerResult[0]) : 0);
+            if (postModel == null)
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Request body was empty.").ConfigureAwait(false);
+                return false;
+            }
 
-            await context.Response.WriteAsync(Layout.Build(layoutModel, _settings));
+            if (!string.IsNullOrWhiteSpace(postModel.DelKey))
+            {
+                await _dataProvider.DeleteKeyAsync(currentDb, postModel.DelKey, context.RequestAborted).ConfigureAwait(false);
+            }
+
+            if (!string.IsNullOrWhiteSpace(postModel.InsertKey) && !string.IsNullOrWhiteSpace(postModel.InsertValue))
+            {
+                await _dataProvider.SetStringAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+
+        private static async Task WriteHtmlAsync(HttpContext context, string html)
+        {
+            context.Response.ContentType = "text/html; charset=utf-8";
+
+            if (!HttpMethods.IsHead(context.Request.Method))
+            {
+                await context.Response.WriteAsync(html).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task WritePlainTextAsync(HttpContext context, int statusCode, string message)
+        {
+            context.Response.StatusCode = statusCode;
+            context.Response.ContentType = "text/plain; charset=utf-8";
+
+            if (!HttpMethods.IsHead(context.Request.Method))
+            {
+                await context.Response.WriteAsync(message).ConfigureAwait(false);
+            }
         }
     }
 }
