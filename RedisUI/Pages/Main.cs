@@ -18,13 +18,20 @@ namespace RedisUI.Pages
             for (var index = 0; index < keys.Count; index++)
             {
                 var key = keys[index];
-                var size = ((long)Encoding.UTF8.GetByteCount(key.Value ?? string.Empty)).ToKilobytes();
+                var size = key.ValueSizeBytes.ToKilobytes();
                 var columns = $@"<td><span class=""badge text-bg-{encoder.Encode(key.Badge)}"">{encoder.Encode(key.KeyType)}</span></td><td>{encoder.Encode(key.Name)}</td><td>{size}</td>";
 
                 tbody.Append($@"<tr class=""redis-row"" style=""cursor: pointer;"" data-index=""{index}"">{columns}<td><button type=""button"" class=""btn btn-sm btn-outline-danger delete-key"" data-index=""{index}""><span>{Icons.Delete}</span></button></td></tr>");
             }
 
-            var keyPayload = JsonSerializer.Serialize(keys.Select(x => new { name = x.Name, value = x.Value ?? string.Empty }));
+            var keyPayload = JsonSerializer.Serialize(keys.Select(x => new
+            {
+                name = x.Name,
+                value = x.Value,
+                base64Value = x.Base64Value,
+                viewerFormat = x.ViewerFormat,
+                valueSizeBytes = x.ValueSizeBytes
+            }));
 
             return $@"
     {InsertModal.Build()}
@@ -69,9 +76,16 @@ namespace RedisUI.Pages
 
         <div class=""col-6"">
             <div class=""card border-info mb-3 sticky-top"">
-                <div class=""card-header"">Value</div>
+                <div class=""card-header d-flex justify-content-between align-items-center"">
+                    <span>Value</span>
+                    <span class=""small text-muted"" id=""valueMeta"">Click on a key to inspect its value.</span>
+                </div>
                 <div class=""card-body"">
-                    <code><pre id=""valueContent"" class=""mb-0"">Click on a key to get value...</pre></code>
+                    <div class=""d-flex gap-2 mb-2"">
+                        <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""expandValue"" hidden>Expand</button>
+                        <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""collapseValue"" hidden>Collapse</button>
+                    </div>
+                    <pre id=""valueContent"" class=""mb-0"">Click on a key to get value...</pre>
                 </div>
             </div>
         </div>
@@ -80,10 +94,13 @@ namespace RedisUI.Pages
 <script>
     document.addEventListener('DOMContentLoaded', function () {{
         const keyData = {keyPayload};
+        const maxPreviewChars = 4000;
         let currentPage = 0;
         let currentDb = 0;
         let currentKey = '';
         let currentSize = 10;
+        let selectedIndex = null;
+        let isExpanded = false;
 
         const searchParams = new URLSearchParams(window.location.search);
         const paramPage = searchParams.get('page');
@@ -91,6 +108,10 @@ namespace RedisUI.Pages
         const paramKey = searchParams.get('key');
         const paramSize = searchParams.get('size');
         const nextCursor = {next};
+        const valueContent = document.getElementById('valueContent');
+        const valueMeta = document.getElementById('valueMeta');
+        const expandValueButton = document.getElementById('expandValue');
+        const collapseValueButton = document.getElementById('collapseValue');
 
         if (paramPage) {{
             currentPage = Number(paramPage);
@@ -150,9 +171,9 @@ namespace RedisUI.Pages
 
         document.querySelectorAll('#redisTable tbody tr.redis-row').forEach(function (row) {{
             row.addEventListener('click', function () {{
-                const index = Number(row.dataset.index);
-                const key = keyData[index];
-                document.getElementById('valueContent').textContent = key ? key.value : '';
+                selectedIndex = Number(row.dataset.index);
+                isExpanded = false;
+                renderSelectedValue();
             }});
         }});
 
@@ -182,6 +203,16 @@ namespace RedisUI.Pages
             }});
         }});
 
+        expandValueButton.addEventListener('click', function () {{
+            isExpanded = true;
+            renderSelectedValue();
+        }});
+
+        collapseValueButton.addEventListener('click', function () {{
+            isExpanded = false;
+            renderSelectedValue();
+        }});
+
         const navElement = document.getElementById('nav' + currentDb);
         if (navElement) {{
             navElement.classList.add('active');
@@ -204,6 +235,51 @@ namespace RedisUI.Pages
         insertValue.addEventListener('input', updateSaveState);
         saveButton.addEventListener('click', saveKey);
         updateSaveState();
+
+        function renderSelectedValue() {{
+            if (selectedIndex === null) {{
+                return;
+            }}
+
+            const key = keyData[selectedIndex];
+            if (!key) {{
+                return;
+            }}
+
+            let content = '';
+            let meta = key.valueSizeBytes + ' bytes';
+
+            if (key.viewerFormat === 'binary') {{
+                content = key.base64Value || '';
+                meta = meta + ' | binary-safe base64 view';
+            }} else if (key.viewerFormat === 'json') {{
+                content = prettyPrintJson(key.value);
+                meta = meta + ' | JSON';
+            }} else {{
+                content = key.value || '';
+            }}
+
+            const needsTruncation = content.length > maxPreviewChars;
+            const displayValue = needsTruncation && !isExpanded
+                ? content.slice(0, maxPreviewChars) + '\n\n... truncated, expand to view the full value ...'
+                : content;
+
+            valueContent.textContent = displayValue || '(empty)';
+            valueMeta.textContent = needsTruncation
+                ? meta + ' | showing ' + Math.min(content.length, maxPreviewChars) + ' of ' + content.length + ' characters'
+                : meta;
+
+            expandValueButton.hidden = !needsTruncation || isExpanded;
+            collapseValueButton.hidden = !needsTruncation || !isExpanded;
+        }}
+
+        function prettyPrintJson(value) {{
+            try {{
+                return JSON.stringify(JSON.parse(value), null, 2);
+            }} catch (_error) {{
+                return value;
+            }}
+        }}
 
         function confirmDelete(delKey) {{
             if (!window.confirm(""Are you sure to delete key '"" + delKey + ""' ?"")) {{
