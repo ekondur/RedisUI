@@ -1,15 +1,13 @@
-﻿using StackExchange.Redis;
-
 namespace RedisUI.Models
 {
     public class KeyModel
     {
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
 
-        public RedisType KeyType { get; set; }
+        public string KeyType { get; set; } = string.Empty;
 
-        public RedisValue Value { get; set; }
+        public string Value { get; set; } = string.Empty;
 
-        public string Badge { get; set; }
+        public string Badge { get; set; } = string.Empty;
     }
 }

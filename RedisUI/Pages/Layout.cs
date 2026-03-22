@@ -1,6 +1,8 @@
-﻿using RedisUI.Contents;
-using RedisUI.Models;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using RedisUI.Contents;
+using RedisUI.Models;
 
 namespace RedisUI.Pages
 {
@@ -8,10 +10,13 @@ namespace RedisUI.Pages
     {
         public static string Build(LayoutModel model, RedisUISettings settings)
         {
+            var encoder = HtmlEncoder.Default;
+            var basePath = NormalizePath(settings.Path);
             var dbList = new StringBuilder();
+
             foreach (var item in model.DbList)
             {
-                dbList.Append($"<li><a class=\"dropdown-item\" id=\"nav{item}\" href=\"javascript:setdb({item});\">{item}</a></li>");
+                dbList.Append($@"<li><button type=""button"" class=""dropdown-item"" id=""nav{encoder.Encode(item)}"" data-db=""{encoder.Encode(item)}"">{encoder.Encode(item)}</button></li>");
             }
 
             return $@"<!DOCTYPE html>
@@ -20,8 +25,8 @@ namespace RedisUI.Pages
     <meta charset=""UTF-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
     <title>Redis Integrated UI</title>
-    <link href=""{settings.CssLink}"" rel=""stylesheet"" crossorigin=""anonymous"">
-    <script src=""{settings.JsLink}"" crossorigin=""anonymous""></script>
+    <link href=""{encoder.Encode(settings.CssLink)}"" rel=""stylesheet"" crossorigin=""anonymous"">
+    <script src=""{encoder.Encode(settings.JsLink)}"" crossorigin=""anonymous""></script>
 
     <style>
         .pagination {{
@@ -41,39 +46,51 @@ namespace RedisUI.Pages
     </style>
 
 <script>
+    window.redisUi = {{
+        basePath: {JsonSerializer.Serialize(basePath)},
+        csrfToken: {JsonSerializer.Serialize(model.AntiForgeryToken)},
+        csrfHeaderName: {JsonSerializer.Serialize(settings.AntiForgeryHeaderName)}
+    }};
 
-    function setdb(db){{
-        var currentPath = window.location.href.replace(window.location.search, '');
-        window.location = currentPath.replace('#', '') + '?page=0&db=' + db;
-    }}
+    window.buildRedisUiUrl = function (overrides) {{
+        const next = overrides || {{}};
+        const current = new URLSearchParams(window.location.search);
+        const hasOwn = function (key) {{
+            return Object.prototype.hasOwnProperty.call(next, key);
+        }};
 
-    function setSize(size){{
-        let currentSize = 10;
-        let currentKey = '';
-        let currentDb = 0;
+        const db = hasOwn('db') ? next.db : (current.get('db') || '0');
+        const size = hasOwn('size') ? next.size : (current.get('size') || '10');
+        const page = hasOwn('page') ? next.page : (current.get('page') || '0');
+        const key = hasOwn('key') ? next.key : (current.get('key') || '');
 
-        var searchParams = new URLSearchParams(window.location.search);
-        var paramDb = searchParams.get('db');
-        var paramKey = searchParams.get('key');
-        var paramSize = searchParams.get('size');
+        const query = new URLSearchParams();
+        query.set('page', String(page));
+        query.set('db', String(db));
+        query.set('size', String(size));
 
-        if (paramDb) {{
-            currentDb = paramDb;
-		}}
-
-        if (paramKey) {{
-            currentKey = paramKey;
+        if (key) {{
+            query.set('key', key);
         }}
 
-        var currentPath = window.location.href.replace(window.location.search, '');
+        return window.redisUi.basePath + '?' + query.toString();
+    }};
 
-		newQueryString = ""&db="" + currentDb + ""&size="" + size + ""&key="" + currentKey;
-
-		newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
-		
-        window.location = newUrl.replace('#', '');
+    function setdb(db) {{
+        window.location = window.buildRedisUiUrl({{ db: db, page: 0 }});
     }}
 
+    function setSize(size) {{
+        window.location = window.buildRedisUiUrl({{ size: size, page: 0 }});
+    }}
+
+    document.addEventListener('DOMContentLoaded', function () {{
+        document.querySelectorAll('[data-db]').forEach(function (button) {{
+            button.addEventListener('click', function () {{
+                setdb(button.dataset.db);
+            }});
+        }});
+    }});
 </script>
 
 </head>
@@ -81,12 +98,12 @@ namespace RedisUI.Pages
     
     <nav class=""navbar navbar-expand-lg bg-dark navbar-dark"">
         <div class=""container-fluid"">
-            <a class=""navbar-brand"" href=""..{settings.Path}"">RedisUI</a>
+            <a class=""navbar-brand"" href=""{encoder.Encode(basePath)}"">RedisUI</a>
             <div class=""collapse navbar-collapse"" id=""navbarSupportedContent"">
               <ul class=""navbar-nav me-auto mb-2 mb-lg-0"">
                 <a class=""navbar-brand"" title=""Keys"">
-                    {Icons.KeyLg}      
-                    {model.DbSize}
+                    {Icons.KeyLg}
+                    {encoder.Encode(model.DbSize)}
                 </a>
                 <li class=""nav-item dropdown"">
                   <a id=""dblink"" class=""nav-link dropdown-toggle"" href=""#"" role=""button"" data-bs-toggle=""dropdown"" aria-expanded=""false"">
@@ -94,11 +111,11 @@ namespace RedisUI.Pages
                   </a>
                   <ul class=""dropdown-menu"">
                     {dbList}
-                  </ul> 
+                  </ul>
                 </li>
               </ul>
-            </div>            
-            <a class=""navbar-brand"" title=""Statistics"" href=""..{settings.Path}/statistics"">
+            </div>
+            <a class=""navbar-brand"" title=""Statistics"" href=""{encoder.Encode(basePath)}/statistics"">
                 {Icons.Statistic}
             </a>
         </div>
@@ -120,7 +137,17 @@ namespace RedisUI.Pages
 </body>
 </html>
 ";
+        }
 
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return "/redis";
+            }
+
+            var normalized = path.StartsWith('/') ? path : "/" + path;
+            return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
         }
     }
 }

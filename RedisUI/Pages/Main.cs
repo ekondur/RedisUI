@@ -1,24 +1,32 @@
-﻿using RedisUI.Contents;
+using System.Linq;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using RedisUI.Contents;
 using RedisUI.Helpers;
 using RedisUI.Models;
-using System.Collections.Generic;
-using System.Text;
 
 namespace RedisUI.Pages
 {
     public static class Main
     {
-        public static string Build(List<KeyModel> keys, long next)
+        public static string Build(System.Collections.Generic.List<KeyModel> keys, long next)
         {
+            var encoder = HtmlEncoder.Default;
             var tbody = new StringBuilder();
-            foreach (var key in keys)
-            {
-                var columns = $"<td><span class=\"badge text-bg-{key.Badge}\">{key.KeyType}</span></td><td>{key.Name}</td><td>{key.Value.Length().ToKilobytes()}</td>";
 
-                tbody.Append($"<tr style=\"cursor: pointer;\" data-value='{key.Value}'>{columns}<td><a onclick=\"confirmDelete('{key.Name}')\" class=\"btn btn-sm btn-outline-danger\"><span>{Icons.Delete}</span></a></td></tr>");
+            for (var index = 0; index < keys.Count; index++)
+            {
+                var key = keys[index];
+                var size = ((long)Encoding.UTF8.GetByteCount(key.Value ?? string.Empty)).ToKilobytes();
+                var columns = $@"<td><span class=""badge text-bg-{encoder.Encode(key.Badge)}"">{encoder.Encode(key.KeyType)}</span></td><td>{encoder.Encode(key.Name)}</td><td>{size}</td>";
+
+                tbody.Append($@"<tr class=""redis-row"" style=""cursor: pointer;"" data-index=""{index}"">{columns}<td><button type=""button"" class=""btn btn-sm btn-outline-danger delete-key"" data-index=""{index}""><span>{Icons.Delete}</span></button></td></tr>");
             }
 
-            var html = $@"
+            var keyPayload = JsonSerializer.Serialize(keys.Select(x => new { name = x.Name, value = x.Value ?? string.Empty }));
+
+            return $@"
     {InsertModal.Build()}
     <div class=""row"">
         <div class=""col-6""><div id=""search"" class=""input-group mb-3""></div></div>
@@ -29,12 +37,12 @@ namespace RedisUI.Pages
         </div>
         <div class=""col-5"">
             <ul class=""pagination"">
-                <li class=""page-item"" id=""size10""><a class=""page-link"" href=""javascript:setSize(10);"">10</a></li>
-                <li class=""page-item"" id=""size20""><a class=""page-link"" href=""javascript:setSize(20);"">20</a></li>
-                <li class=""page-item"" id=""size50""><a class=""page-link"" href=""javascript:setSize(50);"">50</a></li>
-                <li class=""page-item"" id=""size100""><a class=""page-link"" href=""javascript:setSize(100);"">100</a></li>
-                <li class=""page-item"" id=""size500""><a class=""page-link"" href=""javascript:setSize(500);"">500</a></li>
-                <li class=""page-item"" id=""size1000""><a class=""page-link"" href=""javascript:setSize(1000);"">1000</a></li>
+                <li class=""page-item"" id=""size10""><button type=""button"" class=""page-link"">10</button></li>
+                <li class=""page-item"" id=""size20""><button type=""button"" class=""page-link"">20</button></li>
+                <li class=""page-item"" id=""size50""><button type=""button"" class=""page-link"">50</button></li>
+                <li class=""page-item"" id=""size100""><button type=""button"" class=""page-link"">100</button></li>
+                <li class=""page-item"" id=""size500""><button type=""button"" class=""page-link"">500</button></li>
+                <li class=""page-item"" id=""size1000""><button type=""button"" class=""page-link"">1000</button></li>
             </ul>
         </div>
     </div>
@@ -47,7 +55,7 @@ namespace RedisUI.Pages
                             <th scope=""col"">Type</th>
                             <th scope=""col"">Key</th>
                             <th scope=""col"">Size(KB)</th>
-                            <th scope=""col"" class=""col-md-1"">#</th> 
+                            <th scope=""col"" class=""col-md-1"">#</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -63,205 +71,187 @@ namespace RedisUI.Pages
             <div class=""card border-info mb-3 sticky-top"">
                 <div class=""card-header"">Value</div>
                 <div class=""card-body"">
-                    <code><p id=""valueContent"">Click on a key to get value...</p></code>
+                    <code><pre id=""valueContent"" class=""mb-0"">Click on a key to get value...</pre></code>
                 </div>
             </div>
         </div>
     </div>
 
 <script>
-    
     document.addEventListener('DOMContentLoaded', function () {{
+        const keyData = {keyPayload};
         let currentPage = 0;
         let currentDb = 0;
-        let currentKey = null;
+        let currentKey = '';
         let currentSize = 10;
 
-        const table = document.getElementById('redisTable');
-
-        var searchParams = new URLSearchParams(window.location.search);
-		var paramPage = searchParams.get('page');
-        var paramDb = searchParams.get('db');
-        var paramKey = searchParams.get('key');
-        var paramSize = searchParams.get('size');
+        const searchParams = new URLSearchParams(window.location.search);
+        const paramPage = searchParams.get('page');
+        const paramDb = searchParams.get('db');
+        const paramKey = searchParams.get('key');
+        const paramSize = searchParams.get('size');
+        const nextCursor = {next};
 
         if (paramPage) {{
-            currentPage = paramPage;
-		}}
+            currentPage = Number(paramPage);
+        }}
 
         if (paramDb) {{
-            currentDb = paramDb;
-		}}
+            currentDb = Number(paramDb);
+        }}
 
         if (paramKey) {{
             currentKey = paramKey;
         }}
 
         if (paramSize) {{
-            currentSize = paramSize;
+            currentSize = Number(paramSize);
         }}
 
         const paginationContainer = document.getElementById('pagination');
-        paginationContainer.innerHTML = '';
-
-        const nBtn = document.createElement('button');
-        nBtn.innerText = {next} == 0 ? 'Back to top' : 'Next';
-        nBtn.className = ""btn btn-outline-success"";
-        nBtn.id = ""btnNext"";
-        nBtn.addEventListener('click', function () {{
-            showPage({next}, currentDb, currentKey);
-         }});
-        paginationContainer.appendChild(nBtn);
+        const nextButton = document.createElement('button');
+        nextButton.innerText = nextCursor === 0 ? 'Back to top' : 'Next';
+        nextButton.className = 'btn btn-outline-success';
+        nextButton.id = 'btnNext';
+        nextButton.addEventListener('click', function () {{
+            window.location = window.buildRedisUiUrl({{ page: nextCursor, db: currentDb, key: currentKey, size: currentSize }});
+        }});
+        nextButton.hidden = nextCursor === currentPage;
+        paginationContainer.replaceChildren(nextButton);
 
         const searchContainer = document.getElementById('search');
-        searchContainer.innerHTML = '';
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.name = 'searchInput';
+        searchInput.className = 'form-control';
+        searchInput.placeholder = 'key or pattern...';
+        searchInput.value = currentKey;
 
-        const sInput = document.createElement('input');
-        sInput.type = ""text"";
-        sInput.name = ""searchInput"";
-        sInput.className = ""form-control"";
-        sInput.placeholder = ""key or pattern..."";
-        if (currentKey) {{
-            sInput.value = currentKey;
-        }}
-
-        const sBtn = document.createElement('button');
-        sBtn.innerText = 'Search';
-        sBtn.className = 'btn btn-outline-success btn-sm';
-        sBtn.addEventListener('click', function () {{
-            var searchText = sInput.value;
-            if (searchText) {{
-                showPage(0, currentDb, searchText);
-            }} else {{
-                showPage(0, currentDb);
-            }}
-         }});
-
-        sInput.addEventListener(""keypress"", function(event) {{
-          if (event.key === ""Enter"") {{
-            event.preventDefault();
-            sBtn.click();
-          }}
+        const searchButton = document.createElement('button');
+        searchButton.innerText = 'Search';
+        searchButton.className = 'btn btn-outline-success btn-sm';
+        searchButton.addEventListener('click', function () {{
+            window.location = window.buildRedisUiUrl({{
+                page: 0,
+                db: currentDb,
+                size: currentSize,
+                key: searchInput.value.trim()
+            }});
         }});
 
-        searchContainer.appendChild(sInput);
-        searchContainer.appendChild(sBtn);
-
-        function showPage(page, db, key) {{
-            var currentPath = window.location.href.replace(window.location.search, '');
-
-			var newQueryString = ""page="" + page + ""&db="" + db + ""&size="" + currentSize;
-
-            if (key) {{
-                newQueryString = newQueryString + ""&key="" + key;
+        searchInput.addEventListener('keypress', function (event) {{
+            if (event.key === 'Enter') {{
+                event.preventDefault();
+                searchButton.click();
             }}
-
-			// Set the modified URL
-			var newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
-			
-            // Change the current page URL
-            window.location = newUrl.replace('#', '');
-        }}
-
-        const tableRows = document.querySelectorAll(""#redisTable tbody tr"");
-        tableRows.forEach(row => {{
-        row.addEventListener(""click"", function() {{
-            const value = row.getAttribute(""data-value"");
-            valueContent.textContent = JSON.stringify(value, null, 4);
         }});
 
-      }});
+        searchContainer.replaceChildren(searchInput, searchButton);
 
-    var navElement = document.getElementById(""nav""+currentDb);
-    navElement.classList.add(""active"");
+        document.querySelectorAll('#redisTable tbody tr.redis-row').forEach(function (row) {{
+            row.addEventListener('click', function () {{
+                const index = Number(row.dataset.index);
+                const key = keyData[index];
+                document.getElementById('valueContent').textContent = key ? key.value : '';
+            }});
+        }});
 
-    var sizeElement = document.getElementById(""size""+currentSize);
-    sizeElement.classList.add(""active"");
+        document.querySelectorAll('.delete-key').forEach(function (button) {{
+            button.addEventListener('click', function (event) {{
+                event.stopPropagation();
+                const index = Number(button.dataset.index);
+                const key = keyData[index];
 
-    document.getElementById(""btnNext"").hidden = '{next}' == currentPage;
+                if (!key) {{
+                    return;
+                }}
 
-    }});
+                confirmDelete(key.name);
+            }});
+        }});
 
-    let currentSize = 10;
-    let currentKey = '';
-    let currentDb = 0;
-    let currentPage = 0;
+        document.querySelectorAll('[id^=""size""] .page-link').forEach(function (button) {{
+            button.addEventListener('click', function () {{
+                const pageItem = button.parentElement;
+                if (!pageItem) {{
+                    return;
+                }}
 
-    var searchParams = new URLSearchParams(window.location.search);
-    var paramDb = searchParams.get('db');
-    var paramKey = searchParams.get('key');
-    var paramSize = searchParams.get('size');
-	var paramPage = searchParams.get('page');
+                const nextSize = Number(pageItem.id.replace('size', ''));
+                setSize(nextSize);
+            }});
+        }});
 
-    if (paramDb) {{
-        currentDb = paramDb;
-	}}
+        const navElement = document.getElementById('nav' + currentDb);
+        if (navElement) {{
+            navElement.classList.add('active');
+        }}
 
-    if (paramKey) {{
-        currentKey = paramKey;
-    }}
+        const sizeElement = document.getElementById('size' + currentSize);
+        if (sizeElement) {{
+            sizeElement.classList.add('active');
+        }}
 
-    if (paramSize) {{
-        currentSize = paramSize;
-    }}
+        const insertKey = document.getElementById('insertKey');
+        const insertValue = document.getElementById('insertValue');
+        const saveButton = document.getElementById('btnSave');
 
-    if (paramPage) {{
-        currentPage = paramPage;
-	}}
+        const updateSaveState = function () {{
+            saveButton.disabled = !(insertKey.value && insertValue.value);
+        }};
 
-    var currentPath = window.location.href.replace(window.location.search, '');
+        insertKey.addEventListener('input', updateSaveState);
+        insertValue.addEventListener('input', updateSaveState);
+        saveButton.addEventListener('click', saveKey);
+        updateSaveState();
 
-	newQueryString = ""&db="" + currentDb + ""&size="" + currentSize + ""&key="" + currentKey + ""&page="" + currentPage;
+        function confirmDelete(delKey) {{
+            if (!window.confirm(""Are you sure to delete key '"" + delKey + ""' ?"")) {{
+                return;
+            }}
 
-	newUrl = currentPath + (currentPath.indexOf('?') !== -1 ? '&' : '?') + newQueryString;
+            submitMutation({{ DelKey: delKey }});
+        }}
 
-    function confirmDelete(del){{
-        if (confirm(""Are you sure to delete key '"" + del + ""' ?"") == true) 
-        {{
-            fetch(newUrl, {{
-              method: 'POST',
-              body: JSON.stringify({{
-                DelKey: del,
-              }}),
-              headers: {{
-                'Content-type': 'application/json; charset=UTF-8'
-              }}
-            }}).then(function(response) {{
-                window.location = newUrl.replace('#', '');
+        function saveKey() {{
+            submitMutation({{
+                InsertKey: insertKey.value,
+                InsertValue: insertValue.value
             }});
         }}
-    }};
 
-    function saveKey(){{
-        fetch(newUrl, {{
-          method: 'POST',
-          body: JSON.stringify({{
-            InsertKey: document.getElementById(""insertKey"").value,
-            InsertValue: document.getElementById(""insertValue"").value
-          }}),
-          headers: {{
-            'Content-type': 'application/json; charset=UTF-8'
-          }}
-        }}).then(function(response) {{
-            window.location = newUrl.replace('#', '');
-        }});
-    }}
+        function submitMutation(payload) {{
+            fetch(window.buildRedisUiUrl({{
+                db: currentDb,
+                size: currentSize,
+                key: currentKey,
+                page: currentPage
+            }}), {{
+                method: 'POST',
+                body: JSON.stringify(payload),
+                headers: {{
+                    'Content-Type': 'application/json; charset=UTF-8',
+                    [window.redisUi.csrfHeaderName]: window.redisUi.csrfToken
+                }}
+            }}).then(function (response) {{
+                if (response.ok) {{
+                    window.location = window.buildRedisUiUrl({{
+                        db: currentDb,
+                        size: currentSize,
+                        key: currentKey,
+                        page: currentPage
+                    }});
+                    return;
+                }}
 
-    function checkRequired(){{
-        var insertKey = document.getElementById(""insertKey"").value;
-        var insertValue = document.getElementById(""insertValue"").value;
-
-        if (insertKey && insertValue){{
-            document.getElementById(""btnSave"").disabled = false;
+                response.text().then(function (message) {{
+                    window.alert(message || 'RedisUI request failed.');
+                }});
+            }});
         }}
-        else{{
-            document.getElementById(""btnSave"").disabled = true;
-        }}
-    }}
-
+    }});
 </script>
 ";
-            return html;
         }
     }
 }

@@ -1,36 +1,46 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace RedisUI.Models
 {
     public class KeyspaceModel
     {
-        public string Db { get; private set; }
-        public string Keys { get; private set; }
-        public string Expires { get; private set; }
-        public string Avg_Ttl { get; private set; }
+        public string Db { get; private set; } = string.Empty;
+
+        public string Keys { get; private set; } = string.Empty;
+
+        public string Expires { get; private set; } = string.Empty;
+
+        public string Avg_Ttl { get; private set; } = string.Empty;
 
         public static KeyspaceModel Instance(string input)
         {
-            string[] parts = input.Split(':');
-            string database = parts[0].TrimStart('d', 'b');
-            string[] attributes = parts[1].Split(',');
+            var parts = input.Split(':');
+            if (parts.Length < 2)
+            {
+                return new KeyspaceModel();
+            }
 
+            var database = parts[0].TrimStart('d', 'b');
+            var attributes = parts[1].Split(',');
             var attributeMap = new Dictionary<string, string>();
 
-            foreach (string attribute in attributes)
+            foreach (var attribute in attributes)
             {
-                string[] keyValue = attribute.Split('=');
-                string key = keyValue[0];
-                string value = keyValue[1];
-                attributeMap[key] = value;
+                var keyValue = attribute.Split('=');
+                if (keyValue.Length < 2)
+                {
+                    continue;
+                }
+
+                attributeMap[keyValue[0]] = keyValue[1];
             }
 
             return new KeyspaceModel
             {
                 Db = database,
-                Keys = attributeMap["keys"],
-                Expires = attributeMap["expires"],
-                Avg_Ttl = attributeMap["avg_ttl"]
+                Keys = attributeMap.TryGetValue("keys", out var keys) ? keys : "0",
+                Expires = attributeMap.TryGetValue("expires", out var expires) ? expires : "0",
+                Avg_Ttl = attributeMap.TryGetValue("avg_ttl", out var avgTtl) ? avgTtl : "0"
             };
         }
     }

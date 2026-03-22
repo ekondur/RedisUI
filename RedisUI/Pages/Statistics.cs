@@ -1,7 +1,8 @@
-﻿using RedisUI.Models;
 using System.Text;
-using RedisUI.Helpers;
+using System.Text.Encodings.Web;
 using RedisUI.Contents;
+using RedisUI.Helpers;
+using RedisUI.Models;
 
 namespace RedisUI.Pages
 {
@@ -9,16 +10,18 @@ namespace RedisUI.Pages
     {
         public static string Build(StatisticsVm model)
         {
+            var encoder = HtmlEncoder.Default;
             var tbody = new StringBuilder();
+
             foreach (var keyspace in model.Keyspaces)
             {
-                tbody.Append($"<tr><td>{keyspace.Db}</td><td>{keyspace.Keys}</td><td>{keyspace.Expires}</td><td>{keyspace.Avg_Ttl}</td></tr>");
+                tbody.Append($@"<tr><td>{encoder.Encode(keyspace.Db)}</td><td>{encoder.Encode(keyspace.Keys)}</td><td>{encoder.Encode(keyspace.Expires)}</td><td>{encoder.Encode(keyspace.Avg_Ttl)}</td></tr>");
             }
 
             var tbodyInfo = new StringBuilder();
             foreach (var info in model.AllInfo)
             {
-                tbodyInfo.Append($"<tr><td>{info.Key}</td><td>{info.Value}</td></tr>");
+                tbodyInfo.Append($@"<tr><td>{encoder.Encode(info.Key)}</td><td>{encoder.Encode(info.Value)}</td></tr>");
             }
 
             return $@"
@@ -31,12 +34,12 @@ namespace RedisUI.Pages
                         {Icons.Server}
                     </span>Server
                 </strong>
-            </div>            
+            </div>
             <div class=""card-body"">
                 <ul class=""list-group list-group-flush"">
-                    <li class=""list-group-item"">Redis Version: <strong>{model.Server.RedisVersion}</strong></li>
-                    <li class=""list-group-item"">Redis Mode: <strong>{model.Server.RedisMode}</strong></li>
-                    <li class=""list-group-item"">TCP Port: <strong>{model.Server.TcpPort}</strong></li>
+                    <li class=""list-group-item"">Redis Version: <strong>{encoder.Encode(model.Server.RedisVersion)}</strong></li>
+                    <li class=""list-group-item"">Redis Mode: <strong>{encoder.Encode(model.Server.RedisMode)}</strong></li>
+                    <li class=""list-group-item"">TCP Port: <strong>{encoder.Encode(model.Server.TcpPort)}</strong></li>
                 </ul>
             </div>
         </div>
@@ -49,7 +52,7 @@ namespace RedisUI.Pages
                         {Icons.Memory}
                     </span>Memory
                 </strong>
-            </div>            
+            </div>
             <div class=""card-body"">
                 <ul class=""list-group list-group-flush"">
                     <li class=""list-group-item"">Used Memory: <strong>{model.Memory.UsedMemory.ToMegabytes()}</strong>M</li>
@@ -62,7 +65,7 @@ namespace RedisUI.Pages
     <div class=""col-4"">
         <div class=""card border-info mb-3 sticky-top"">
             <div class=""card-header"">
-                <strong>    
+                <strong>
                     <span>
                         {Icons.Stats}
                     </span>Stats
@@ -70,9 +73,9 @@ namespace RedisUI.Pages
             </div>
             <div class=""card-body"">
                 <ul class=""list-group list-group-flush"">
-                    <li class=""list-group-item"">Total Connections Received: <strong>{model.Stats.TotalConnectionsReceived}</strong></li>
-                    <li class=""list-group-item"">Total Commands Processed: <strong>{model.Stats.TotalCommandsProcessed}</strong></li>
-                    <li class=""list-group-item"">Expired Keys: <strong>{model.Stats.ExpiredKeys}</strong></li>
+                    <li class=""list-group-item"">Total Connections Received: <strong>{encoder.Encode(model.Stats.TotalConnectionsReceived)}</strong></li>
+                    <li class=""list-group-item"">Total Commands Processed: <strong>{encoder.Encode(model.Stats.TotalCommandsProcessed)}</strong></li>
+                    <li class=""list-group-item"">Expired Keys: <strong>{encoder.Encode(model.Stats.ExpiredKeys)}</strong></li>
                 </ul>
             </div>
         </div>
@@ -97,7 +100,7 @@ namespace RedisUI.Pages
             </tr>
           </thead>
           <tbody>
-            {tbody}       
+            {tbody}
           </tbody>
         </table>
     </div>
@@ -119,7 +122,7 @@ namespace RedisUI.Pages
             </tr>
           </thead>
           <tbody>
-             {tbodyInfo}     
+             {tbodyInfo}
           </tbody>
         </table>
     </div>
