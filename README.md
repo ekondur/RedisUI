@@ -1,4 +1,5 @@
 # Redis Integrated UI
+
 [![NuGet](http://img.shields.io/nuget/v/RedisUI.svg)](https://www.nuget.org/packages/RedisUI/)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/0d07393843a7422788c7a49a7875b99e)](https://app.codacy.com/gh/ekondur/RedisUI/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
@@ -7,8 +8,28 @@ Redis Integrated UI is a .NET project designed to simplify the integration of a 
 ## Features
 
 - **Integration Ease**: Simplifies the process of integrating a Redis UI page into web applications.
-- **Redis Key Management**: Provides functionality to interact with Redis keys conveniently.
-  
+
+- **Redis Key Management**: Provides functionality to interact with Redis keys conveniently. Supports viewing and inserting all major Redis data types:
+
+  | Type       | View | Insert                   |
+  |------------|------|--------------------------|
+  | String     | ✅   | ✅                       |
+  | List       | ✅   | ✅ (RPUSH)               |
+  | Set        | ✅   | ✅ (SADD)                |
+  | Hash       | ✅   | ✅ (HSET field/value)    |
+  | Sorted Set | ✅   | ✅ (ZADD member/score)   |
+  | Stream     | ✅   | ✅ (XADD JSON fields)    |
+
+- **TTL & Expiration Management**: Full control over key expiry directly from the UI:
+  - TTL column in the key list — `∞` for persistent keys, `Xs` for expiring ones
+  - Value inspector shows remaining TTL in the metadata line
+  - **Set Expiry**: enter a TTL in seconds and apply it to any selected key (`EXPIRE`)
+  - **Persist**: remove expiry from a key to make it permanent (`PERSIST`)
+  - **Expiring filter**: toggle button to show only keys that have a TTL set
+  - Optional TTL field in the Add/Edit modal to set expiry at insert time
+
+- **Key Metadata**: Displays value size and TTL (time-to-live) for each key in the value inspector panel.
+
   ![image](https://github.com/ekondur/RedisUI/assets/4971326/cef9e4e3-4669-4e5d-98ab-772cab09428f)
 
 - **Server Statistics**: Displays statistics related to the Redis server for monitoring and analysis purposes.
@@ -21,33 +42,41 @@ To integrate the Redis UI into your application, follow these steps:
 
 - Install [RedisUI](https://www.nuget.org/packages/RedisUI/) from the NuGet Gallery.
 
-```
+```shell
 PM> Install-Package RedisUI
 ```
+
 - Add the middleware to your project.
+
 ```csharp
 using RedisUI;
 
 app.UseRedisUI();
 ```
+
 - Run your project and browse **/redis** path. easy peasy!
 
 ## Settings
-- The ```Path``` is "/redis" by default, set a new path.
+
+- The `Path` is "/redis" by default, set a new path.
+
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
     Path = "/myredisui",
 });
 ```
-- The ```ConnectionString``` is "localhost" by default, set the connection string.
+
+- The `ConnectionString` is "localhost" by default, set the connection string.
+
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
     ConnectionString = "1.1.1.1:6379",
 });
 ```
-- Use ```ConfigurationOptions``` for detailed settings.
+
+- Use `ConfigurationOptions` for detailed settings.
 
 ```csharp
 ConfigurationOptions options = new ConfigurationOptions
@@ -56,9 +85,10 @@ ConfigurationOptions options = new ConfigurationOptions
     User = "default",  // use your Redis user. More info https://redis.io/docs/management/security/acl/
     Password = "secret", // use your Redis password
     Ssl = true,
-    SslProtocols = System.Security.Authentication.SslProtocols.Tls12                
+    SslProtocols = System.Security.Authentication.SslProtocols.Tls13
 };
 ```
+
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
@@ -67,6 +97,7 @@ app.UseRedisUI(new RedisUISettings
 ```
 
 - The UI is using Bootstrap 5.3.2 version from [CDN](https://getbootstrap.com/), you can get it from locally via setting properties below:
+
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
@@ -74,10 +105,13 @@ app.UseRedisUI(new RedisUISettings
     JsLink = "..\\mypath\\bootstrap.js"
 });
 ```
+
 ## Authorization
+
 You can limit access to Redis data in the production environment.
 
-- Add a new authorization filter and implement ```IRedisAuthorizationFilter```
+- Add a new authorization filter and implement `IRedisAuthorizationFilter`
+
 ```csharp
 using RedisUI;
 
@@ -96,12 +130,14 @@ public class MyAuthorizationFilter : IRedisAuthorizationFilter
     }
 }
 ```
+
 ```csharp
 app.UseRedisUI(new RedisUISettings
 {
     AuthorizationFilter = new MyAuthorizationFilter(app.Environment.IsDevelopment())
 });
 ```
+
 ## Contributing
 
 Contributions are welcome! If you'd like to contribute to Redis Integrated UI, please follow these guidelines:
@@ -119,7 +155,6 @@ This project is licensed under the [MIT License](LICENSE.txt).
 ## Contact
 
 For any inquiries or support regarding Redis Integrated UI, feel free to contact the project maintainer:
+
 - Email: [emrahkondur@hotmail.com](mailto:emrahkondur@hotmail.com)
 - GitHub: [ekondur](https://github.com/ekondur)
-
-
