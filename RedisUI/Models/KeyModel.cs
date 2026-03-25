@@ -15,5 +15,8 @@ namespace RedisUI.Models
         public string Base64Value { get; set; } = string.Empty;
 
         public long ValueSizeBytes { get; set; }
+
+        /// <summary>Remaining TTL in seconds, or null if the key has no expiry.</summary>
+        public long? TTLSeconds { get; set; }
     }
 }

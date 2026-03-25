@@ -15,5 +15,17 @@ namespace RedisUI.Infra
         Task DeleteKeyAsync(int database, string key, CancellationToken cancellationToken = default);
 
         Task SetStringAsync(int database, string key, string value, CancellationToken cancellationToken = default);
+
+        Task ListPushAsync(int database, string key, string element, CancellationToken cancellationToken = default);
+
+        Task SetAddAsync(int database, string key, string member, CancellationToken cancellationToken = default);
+
+        Task HashSetAsync(int database, string key, string field, string value, CancellationToken cancellationToken = default);
+
+        Task SortedSetAddAsync(int database, string key, string member, double score, CancellationToken cancellationToken = default);
+
+        Task StreamAddAsync(int database, string key, System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string, string>> fields, CancellationToken cancellationToken = default);
+
+        Task SetExpiryAsync(int database, string key, TimeSpan? expiry, CancellationToken cancellationToken = default);
     }
 }

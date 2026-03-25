@@ -13,10 +13,29 @@ namespace RedisUI.Pages
       </div>
       <div class=""modal-body"">
         <div class=""mb-3"">
-          <input type=""text"" class=""form-control"" id=""insertKey"" placeholder=""Key"">
+          <select class=""form-select"" id=""insertType"">
+            <option value=""string"">String</option>
+            <option value=""list"">List</option>
+            <option value=""set"">Set</option>
+            <option value=""hash"">Hash</option>
+            <option value=""sortedset"">Sorted Set</option>
+            <option value=""stream"">Stream</option>
+          </select>
         </div>
         <div class=""mb-3"">
-          <textarea rows=""10"" class=""form-control"" id=""insertValue"" placeholder=""Value""></textarea>
+          <input type=""text"" class=""form-control"" id=""insertKey"" placeholder=""Key"">
+        </div>
+        <div class=""mb-3"" id=""fieldGroup"" style=""display:none"">
+          <input type=""text"" class=""form-control"" id=""insertField"" placeholder=""Field"">
+        </div>
+        <div class=""mb-3"" id=""scoreGroup"" style=""display:none"">
+          <input type=""number"" class=""form-control"" id=""insertScore"" placeholder=""Score"" step=""any"">
+        </div>
+        <div class=""mb-3"">
+          <textarea rows=""8"" class=""form-control"" id=""insertValue"" placeholder=""Value""></textarea>
+        </div>
+        <div class=""mb-3"">
+          <input type=""number"" class=""form-control"" id=""insertTTL"" placeholder=""TTL in seconds (optional)"" min=""1"">
         </div>
       </div>
       <div class=""modal-footer"">

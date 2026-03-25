@@ -282,5 +282,17 @@ public class MiddlewareTests
             LastInsertedValue = value;
             return Task.CompletedTask;
         }
+
+        public Task ListPushAsync(int database, string key, string element, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SetAddAsync(int database, string key, string member, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task HashSetAsync(int database, string key, string field, string value, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SortedSetAddAsync(int database, string key, string member, double score, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StreamAddAsync(int database, string key, IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SetExpiryAsync(int database, string key, TimeSpan? expiry, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

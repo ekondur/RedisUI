@@ -271,14 +271,91 @@ namespace RedisUI
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(postModel.DelKey))
+            try
             {
-                await _dataProvider.DeleteKeyAsync(currentDb, postModel.DelKey, context.RequestAborted).ConfigureAwait(false);
-            }
+                if (!string.IsNullOrWhiteSpace(postModel.DelKey))
+                {
+                    await _dataProvider.DeleteKeyAsync(currentDb, postModel.DelKey, context.RequestAborted).ConfigureAwait(false);
+                }
 
-            if (!string.IsNullOrWhiteSpace(postModel.InsertKey) && !string.IsNullOrWhiteSpace(postModel.InsertValue))
+                if (!string.IsNullOrWhiteSpace(postModel.InsertKey) && !string.IsNullOrWhiteSpace(postModel.InsertValue))
+                {
+                    switch (postModel.InsertType?.ToLowerInvariant())
+                    {
+                        case "list":
+                            await _dataProvider.ListPushAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
+                            break;
+
+                        case "set":
+                            await _dataProvider.SetAddAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
+                            break;
+
+                        case "hash":
+                            if (string.IsNullOrWhiteSpace(postModel.InsertField))
+                            {
+                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Hash insert requires a field name.").ConfigureAwait(false);
+                                return false;
+                            }
+                            await _dataProvider.HashSetAsync(currentDb, postModel.InsertKey, postModel.InsertField, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
+                            break;
+
+                        case "sortedset":
+                            if (!double.TryParse(postModel.InsertScore, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var score))
+                            {
+                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Sorted set insert requires a numeric score.").ConfigureAwait(false);
+                                return false;
+                            }
+                            await _dataProvider.SortedSetAddAsync(currentDb, postModel.InsertKey, postModel.InsertValue, score, context.RequestAborted).ConfigureAwait(false);
+                            break;
+
+                        case "stream":
+                            Dictionary<string, string>? streamFields;
+                            try
+                            {
+                                streamFields = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(postModel.InsertValue);
+                            }
+                            catch (System.Text.Json.JsonException)
+                            {
+                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Stream insert requires a JSON object, e.g. {\"field\":\"value\"}.").ConfigureAwait(false);
+                                return false;
+                            }
+                            if (streamFields == null || streamFields.Count == 0)
+                            {
+                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Stream fields JSON object must not be empty.").ConfigureAwait(false);
+                                return false;
+                            }
+                            await _dataProvider.StreamAddAsync(currentDb, postModel.InsertKey, streamFields, context.RequestAborted).ConfigureAwait(false);
+                            break;
+
+                        default: // "string"
+                            await _dataProvider.SetStringAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
+                            break;
+                    }
+
+                    if (postModel.InsertTTLSeconds.HasValue && postModel.InsertTTLSeconds.Value > 0)
+                    {
+                        await _dataProvider.SetExpiryAsync(currentDb, postModel.InsertKey, TimeSpan.FromSeconds(postModel.InsertTTLSeconds.Value), context.RequestAborted).ConfigureAwait(false);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(postModel.SetExpiryKey))
+                {
+                    if (postModel.ExpireSeconds.HasValue && postModel.ExpireSeconds.Value < 1)
+                    {
+                        await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Expiry must be at least 1 second.").ConfigureAwait(false);
+                        return false;
+                    }
+
+                    var expiry = postModel.ExpireSeconds.HasValue
+                        ? TimeSpan.FromSeconds(postModel.ExpireSeconds.Value)
+                        : (TimeSpan?)null;
+                    await _dataProvider.SetExpiryAsync(currentDb, postModel.SetExpiryKey, expiry, context.RequestAborted).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await _dataProvider.SetStringAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
+                await WritePlainTextAsync(context, StatusCodes.Status500InternalServerError, ex.Message).ConfigureAwait(false);
+                return false;
             }
 
             return true;

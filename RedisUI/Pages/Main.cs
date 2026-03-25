@@ -19,7 +19,8 @@ namespace RedisUI.Pages
             {
                 var key = keys[index];
                 var size = key.ValueSizeBytes.ToKilobytes();
-                var columns = $@"<td><span class=""badge text-bg-{encoder.Encode(key.Badge)}"">{encoder.Encode(key.KeyType)}</span></td><td>{encoder.Encode(key.Name)}</td><td>{size}</td>";
+                var ttlText = key.TTLSeconds.HasValue ? key.TTLSeconds.Value + "s" : "∞";
+                var columns = $@"<td><span class=""badge text-bg-{encoder.Encode(key.Badge)}"">{encoder.Encode(key.KeyType)}</span></td><td>{encoder.Encode(key.Name)}</td><td>{size}</td><td class=""small text-muted"">{ttlText}</td>";
 
                 tbody.Append($@"<tr class=""redis-row"" style=""cursor: pointer;"" data-index=""{index}"">{columns}<td><button type=""button"" class=""btn btn-sm btn-outline-danger delete-key"" data-index=""{index}""><span>{Icons.Delete}</span></button></td></tr>");
             }
@@ -30,7 +31,8 @@ namespace RedisUI.Pages
                 value = x.Value,
                 base64Value = x.Base64Value,
                 viewerFormat = x.ViewerFormat,
-                valueSizeBytes = x.ValueSizeBytes
+                valueSizeBytes = x.ValueSizeBytes,
+                ttlSeconds = x.TTLSeconds
             }));
 
             return $@"
@@ -62,6 +64,7 @@ namespace RedisUI.Pages
                             <th scope=""col"">Type</th>
                             <th scope=""col"">Key</th>
                             <th scope=""col"">Size(KB)</th>
+                            <th scope=""col"">TTL</th>
                             <th scope=""col"" class=""col-md-1"">#</th>
                         </tr>
                     </thead>
@@ -87,6 +90,12 @@ namespace RedisUI.Pages
                     </div>
                     <pre id=""valueContent"" class=""mb-0"">Click on a key to get value...</pre>
                 </div>
+                <div class=""card-footer d-flex align-items-center gap-2 flex-wrap"" id=""expirySection"" hidden>
+                    <span class=""small text-muted"">Expiry:</span>
+                    <input type=""number"" class=""form-control form-control-sm"" id=""expiryInput"" placeholder=""seconds"" min=""1"" style=""width:110px"">
+                    <button type=""button"" class=""btn btn-sm btn-outline-warning"" id=""btnSetExpiry"">Set</button>
+                    <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""btnPersist"">Persist</button>
+                </div>
             </div>
         </div>
     </div>
@@ -101,6 +110,7 @@ namespace RedisUI.Pages
         let currentSize = 10;
         let selectedIndex = null;
         let isExpanded = false;
+        let filterExpiring = false;
 
         const searchParams = new URLSearchParams(window.location.search);
         const paramPage = searchParams.get('page');
@@ -167,7 +177,38 @@ namespace RedisUI.Pages
             }}
         }});
 
-        searchContainer.replaceChildren(searchInput, searchButton);
+        const filterButton = document.createElement('button');
+        filterButton.innerText = 'Expiring';
+        filterButton.className = 'btn btn-outline-warning btn-sm';
+        filterButton.title = 'Show only keys with a TTL set';
+        filterButton.addEventListener('click', function () {{
+            filterExpiring = !filterExpiring;
+            filterButton.classList.toggle('active', filterExpiring);
+            applyExpiringFilter();
+        }});
+
+        searchContainer.replaceChildren(searchInput, searchButton, filterButton);
+
+        const expirySection = document.getElementById('expirySection');
+        const expiryInput = document.getElementById('expiryInput');
+
+        document.getElementById('btnSetExpiry').addEventListener('click', function () {{
+            if (selectedIndex === null) {{ return; }}
+            const key = keyData[selectedIndex];
+            const seconds = parseInt(expiryInput.value, 10);
+            if (!seconds || seconds < 1) {{
+                window.alert('Enter a TTL of at least 1 second.');
+                return;
+            }}
+            submitMutation({{ SetExpiryKey: key.name, ExpireSeconds: seconds }});
+        }});
+
+        document.getElementById('btnPersist').addEventListener('click', function () {{
+            if (selectedIndex === null) {{ return; }}
+            const key = keyData[selectedIndex];
+            if (!window.confirm(""Remove expiry from '"" + key.name + ""'?"")) {{ return; }}
+            submitMutation({{ SetExpiryKey: key.name }});
+        }});
 
         document.querySelectorAll('#redisTable tbody tr.redis-row').forEach(function (row) {{
             row.addEventListener('click', function () {{
@@ -223,15 +264,44 @@ namespace RedisUI.Pages
             sizeElement.classList.add('active');
         }}
 
+        const insertType = document.getElementById('insertType');
         const insertKey = document.getElementById('insertKey');
+        const insertField = document.getElementById('insertField');
+        const insertScore = document.getElementById('insertScore');
         const insertValue = document.getElementById('insertValue');
+        const insertTTL = document.getElementById('insertTTL');
         const saveButton = document.getElementById('btnSave');
+        const fieldGroup = document.getElementById('fieldGroup');
+        const scoreGroup = document.getElementById('scoreGroup');
 
-        const updateSaveState = function () {{
-            saveButton.disabled = !(insertKey.value && insertValue.value);
+        const valuePlaceholders = {{
+            string: 'Value',
+            list: 'Element to append',
+            set: 'Member to add',
+            hash: 'Value',
+            sortedset: 'Member',
+            stream: 'Fields as JSON object, e.g. {{""field1"":""val1"",""field2"":""val2""}}'
         }};
 
+        function applyTypeLayout() {{
+            const type = insertType.value;
+            fieldGroup.style.display = type === 'hash' ? '' : 'none';
+            scoreGroup.style.display = type === 'sortedset' ? '' : 'none';
+            insertValue.placeholder = valuePlaceholders[type] || 'Value';
+            updateSaveState();
+        }}
+
+        const updateSaveState = function () {{
+            const type = insertType.value;
+            const fieldOk = type !== 'hash' || insertField.value.trim().length > 0;
+            const scoreOk = type !== 'sortedset' || (insertScore.value.trim().length > 0 && !isNaN(Number(insertScore.value)));
+            saveButton.disabled = !(insertKey.value.trim() && insertValue.value.trim() && fieldOk && scoreOk);
+        }};
+
+        insertType.addEventListener('change', applyTypeLayout);
         insertKey.addEventListener('input', updateSaveState);
+        insertField.addEventListener('input', updateSaveState);
+        insertScore.addEventListener('input', updateSaveState);
         insertValue.addEventListener('input', updateSaveState);
         saveButton.addEventListener('click', saveKey);
         updateSaveState();
@@ -259,6 +329,10 @@ namespace RedisUI.Pages
                 content = key.value || '';
             }}
 
+            if (key.ttlSeconds !== null && key.ttlSeconds !== undefined) {{
+                meta = meta + ' | TTL: ' + key.ttlSeconds + 's';
+            }}
+
             const needsTruncation = content.length > maxPreviewChars;
             const displayValue = needsTruncation && !isExpanded
                 ? content.slice(0, maxPreviewChars) + '\n\n... truncated, expand to view the full value ...'
@@ -271,6 +345,17 @@ namespace RedisUI.Pages
 
             expandValueButton.hidden = !needsTruncation || isExpanded;
             collapseValueButton.hidden = !needsTruncation || !isExpanded;
+
+            expirySection.hidden = false;
+            expiryInput.value = (key.ttlSeconds !== null && key.ttlSeconds !== undefined) ? key.ttlSeconds : '';
+        }}
+
+        function applyExpiringFilter() {{
+            document.querySelectorAll('#redisTable tbody tr.redis-row').forEach(function (row) {{
+                const key = keyData[Number(row.dataset.index)];
+                const hasExpiry = key && key.ttlSeconds !== null && key.ttlSeconds !== undefined;
+                row.style.display = (filterExpiring && !hasExpiry) ? 'none' : '';
+            }});
         }}
 
         function prettyPrintJson(value) {{
@@ -290,10 +375,23 @@ namespace RedisUI.Pages
         }}
 
         function saveKey() {{
-            submitMutation({{
+            const type = insertType.value;
+            const payload = {{
                 InsertKey: insertKey.value,
+                InsertType: type,
                 InsertValue: insertValue.value
-            }});
+            }};
+            if (type === 'hash') {{
+                payload.InsertField = insertField.value;
+            }}
+            if (type === 'sortedset') {{
+                payload.InsertScore = insertScore.value;
+            }}
+            const ttlVal = parseInt(insertTTL.value, 10);
+            if (ttlVal > 0) {{
+                payload.InsertTTLSeconds = ttlVal;
+            }}
+            submitMutation(payload);
         }}
 
         function submitMutation(payload) {{

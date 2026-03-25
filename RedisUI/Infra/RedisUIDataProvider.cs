@@ -120,6 +120,43 @@ namespace RedisUI.Infra
             await redisDb.ExecuteAsync("SET", key, value).ConfigureAwait(false);
         }
 
+        public async Task ListPushAsync(int database, string key, string element, CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            await redisDb.ListRightPushAsync(key, element).ConfigureAwait(false);
+        }
+
+        public async Task SetAddAsync(int database, string key, string member, CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            await redisDb.SetAddAsync(key, member).ConfigureAwait(false);
+        }
+
+        public async Task HashSetAsync(int database, string key, string field, string value, CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            await redisDb.HashSetAsync(key, field, value).ConfigureAwait(false);
+        }
+
+        public async Task SortedSetAddAsync(int database, string key, string member, double score, CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            await redisDb.SortedSetAddAsync(key, member, score).ConfigureAwait(false);
+        }
+
+        public async Task StreamAddAsync(int database, string key, IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            var nameValues = fields.Select(f => new NameValueEntry(f.Key, f.Value)).ToArray();
+            await redisDb.StreamAddAsync(key, nameValues).ConfigureAwait(false);
+        }
+
+        public async Task SetExpiryAsync(int database, string key, TimeSpan? expiry, CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            await redisDb.KeyExpireAsync(key, expiry).ConfigureAwait(false);
+        }
+
         public void Dispose()
         {
             if (_ownedConnection != null && _ownedConnection.IsValueCreated)
@@ -131,13 +168,16 @@ namespace RedisUI.Infra
         private async Task<KeyModel> BuildKeyAsync(IDatabase redisDb, string keyName)
         {
             var keyType = await redisDb.KeyTypeAsync(keyName).ConfigureAwait(false);
+            var ttl = await redisDb.KeyTimeToLiveAsync(keyName).ConfigureAwait(false);
 
-            return keyType switch
+            var model = keyType switch
             {
                 RedisType.String => CreateStringKeyModel(keyName, keyType, await redisDb.StringGetAsync(keyName).ConfigureAwait(false), "light"),
                 RedisType.Hash => CreateStructuredKeyModel(keyName, keyType, await redisDb.HashGetAllAsync(keyName).ConfigureAwait(false), "success"),
                 RedisType.List => CreateStructuredKeyModel(keyName, keyType, await redisDb.ListRangeAsync(keyName).ConfigureAwait(false), "warning"),
                 RedisType.Set => CreateStructuredKeyModel(keyName, keyType, await redisDb.SetMembersAsync(keyName).ConfigureAwait(false), "primary"),
+                RedisType.SortedSet => CreateSortedSetKeyModel(keyName, keyType, await redisDb.SortedSetRangeByRankWithScoresAsync(keyName).ConfigureAwait(false)),
+                RedisType.Stream => CreateStreamKeyModel(keyName, keyType, await redisDb.StreamRangeAsync(keyName).ConfigureAwait(false)),
                 RedisType.None => new KeyModel
                 {
                     Name = keyName,
@@ -157,6 +197,9 @@ namespace RedisUI.Infra
                     ValueSizeBytes = 0
                 }
             };
+
+            model.TTLSeconds = ttl.HasValue ? (long)Math.Ceiling(ttl.Value.TotalSeconds) : (long?)null;
+            return model;
         }
 
         private static KeyModel CreateStringKeyModel(string keyName, RedisType keyType, RedisValue value, string badge)
@@ -219,6 +262,48 @@ namespace RedisUI.Infra
                 Badge = badge,
                 ViewerFormat = "json",
                 ValueSizeBytes = values.Sum(GetSizeBytes)
+            };
+        }
+
+        private static KeyModel CreateSortedSetKeyModel(string keyName, RedisType keyType, SortedSetEntry[] entries)
+        {
+            var serialized = entries.Select(e => new
+            {
+                member = FormatValueElement(e.Element),
+                score = e.Score
+            });
+
+            return new KeyModel
+            {
+                Name = keyName,
+                KeyType = keyType.ToString(),
+                Value = JsonSerializer.Serialize(serialized),
+                Badge = "info",
+                ViewerFormat = "json",
+                ValueSizeBytes = entries.Sum(e => GetSizeBytes(e.Element))
+            };
+        }
+
+        private static KeyModel CreateStreamKeyModel(string keyName, RedisType keyType, StreamEntry[] entries)
+        {
+            var serialized = entries.Select(e => new
+            {
+                id = e.Id.ToString(),
+                fields = e.Values.Select(v => new
+                {
+                    name = v.Name.ToString(),
+                    value = FormatValueElement(v.Value)
+                })
+            });
+
+            return new KeyModel
+            {
+                Name = keyName,
+                KeyType = keyType.ToString(),
+                Value = JsonSerializer.Serialize(serialized),
+                Badge = "dark",
+                ViewerFormat = "json",
+                ValueSizeBytes = entries.Sum(e => e.Values.Sum(v => GetSizeBytes(v.Value)))
             };
         }
 
