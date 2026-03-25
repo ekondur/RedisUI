@@ -30,7 +30,7 @@ Redis Integrated UI is a .NET project designed to simplify the integration of a 
 
 - **Key Metadata**: Displays value size and TTL (time-to-live) for each key in the value inspector panel.
 
-  ![image](https://github.com/ekondur/RedisUI/assets/4971326/cef9e4e3-4669-4e5d-98ab-772cab09428f)
+  <img width="1234" height="499" alt="image" src="https://github.com/user-attachments/assets/baf001ab-a4f8-4b07-9e67-3e7e8cb9f62a" />
 
 - **Server Statistics**: Displays statistics related to the Redis server for monitoring and analysis purposes.
 
