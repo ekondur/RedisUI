@@ -4,6 +4,8 @@ namespace RedisUI.Models
     {
         public long NextCursor { get; set; }
 
+        public int NextPageOffset { get; set; }
+
         public List<KeyModel> Keys { get; set; } = new();
     }
 }

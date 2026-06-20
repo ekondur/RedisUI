@@ -120,6 +120,188 @@ public class MiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeAsync_ReturnsJsonPreview_ForValueEndpoint()
+    {
+        var provider = new FakeRedisUIDataProvider
+        {
+            Preview = new KeyValuePreviewModel
+            {
+                Name = "users:1",
+                KeyType = "String",
+                Value = "preview",
+                ViewerFormat = "text",
+                ValueSizeBytes = 20,
+                Offset = 5,
+                NextOffset = 12,
+                Count = 7,
+                TotalItems = 20,
+                PagingUnit = "bytes",
+                PageMode = "offset",
+                HasMore = true
+            }
+        };
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = provider });
+
+        var context = CreateContext("/redis/value?db=2&key=users%3A1&offset=5&count=7&cursor=abc");
+
+        await middleware.InvokeAsync(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.StartsWith("application/json", context.Response.ContentType);
+        Assert.Contains("\"value\":\"preview\"", body);
+        Assert.Equal(2, provider.LastPreviewDatabase);
+        Assert.Equal("users:1", provider.LastPreviewKey);
+        Assert.Equal(5, provider.LastPreviewOffset);
+        Assert.Equal(7, provider.LastPreviewCount);
+        Assert.Equal("abc", provider.LastPreviewCursor);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ReturnsBadRequest_ForValueEndpointWithoutKey()
+    {
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = new FakeRedisUIDataProvider() });
+
+        var context = CreateContext("/redis/value");
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        Assert.Contains("The 'key' query parameter is required.", await ReadBodyAsync(context));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DoesNotExposeExceptionMessage_ForValueEndpointFailure()
+    {
+        var provider = new FakeRedisUIDataProvider
+        {
+            PreviewException = new InvalidOperationException("sensitive redis detail")
+        };
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = provider });
+
+        var context = CreateContext("/redis/value?key=users%3A1");
+
+        await middleware.InvokeAsync(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        Assert.Equal("RedisUI request failed.", body);
+        Assert.DoesNotContain("sensitive redis detail", body);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DoesNotExposeExceptionMessage_ForMutationFailure()
+    {
+        var provider = new FakeRedisUIDataProvider
+        {
+            DeleteException = new InvalidOperationException("sensitive redis detail")
+        };
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = provider });
+
+        var context = CreateContext("/redis", method: "POST");
+        SetJsonBody(context, """{"DelKey":"users:1"}""");
+        context.Request.Headers["Cookie"] = "RedisUI.AntiForgery=test-token";
+        context.Request.Headers["X-RedisUI-CSRF"] = "test-token";
+
+        await middleware.InvokeAsync(context);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        Assert.Equal("RedisUI request failed.", body);
+        Assert.DoesNotContain("sensitive redis detail", body);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_LimitsRenderedKeys_ToRequestedPageSize()
+    {
+        var provider = new FakeRedisUIDataProvider
+        {
+            KeyPage = new KeyPageModel
+            {
+                NextCursor = 1,
+                Keys = Enumerable.Range(0, 13)
+                    .Select(index => new KeyModel
+                    {
+                        Name = "key:" + index,
+                        KeyType = "String",
+                        Value = string.Empty,
+                        Badge = "light"
+                    })
+                    .ToList()
+            }
+        };
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = provider });
+
+        var context = CreateContext("/redis?size=10");
+
+        await middleware.InvokeAsync(context);
+
+        var html = await ReadBodyAsync(context);
+        Assert.Equal(10, CountOccurrences(html, @"class=""redis-row"""));
+        Assert.DoesNotContain("key:10", html);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_PassesPageOffset_ToKeyPageProvider()
+    {
+        var provider = new FakeRedisUIDataProvider();
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = provider });
+
+        var context = CreateContext("/redis?page=123&offset=10&size=10");
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(123, provider.LastKeyPageCursor);
+        Assert.Equal(10, provider.LastKeyPageOffset);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_RendersNextPageOffset_InMainPage()
+    {
+        var provider = new FakeRedisUIDataProvider
+        {
+            KeyPage = new KeyPageModel
+            {
+                NextCursor = 0,
+                NextPageOffset = 10,
+                Keys =
+                [
+                    new KeyModel
+                    {
+                        Name = "users:1",
+                        KeyType = "String",
+                        Value = string.Empty,
+                        Badge = "light"
+                    }
+                ]
+            }
+        };
+        var middleware = CreateMiddleware(
+            _ => Task.CompletedTask,
+            new RedisUISettings { DataProvider = provider });
+
+        var context = CreateContext("/redis");
+
+        await middleware.InvokeAsync(context);
+
+        var html = await ReadBodyAsync(context);
+        Assert.Contains("const nextOffset = 10;", html);
+        Assert.Contains("offset: nextOffset", html);
+    }
+
+    [Fact]
     public async Task InvokeAsync_EncodesKeyContent_InMainPage()
     {
         var provider = new FakeRedisUIDataProvider
@@ -212,12 +394,26 @@ public class MiddlewareTests
         return await reader.ReadToEndAsync();
     }
 
+    private static int CountOccurrences(string value, string search)
+    {
+        var count = 0;
+        var startIndex = 0;
+
+        while ((startIndex = value.IndexOf(search, startIndex, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            startIndex += search.Length;
+        }
+
+        return count;
+    }
+
     private sealed class DenyAuthorizationFilter : IRedisAuthorizationFilter
     {
         public bool Authorize(HttpContext context) => false;
     }
 
-    private sealed class FakeRedisUIDataProvider : IRedisUIDataProvider
+    private sealed class FakeRedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider
     {
         public KeyPageModel KeyPage { get; set; } = new()
         {
@@ -247,8 +443,48 @@ public class MiddlewareTests
 
         public string? LastInsertedValue { get; private set; }
 
+        public Exception? DeleteException { get; set; }
+
+        public Exception? PreviewException { get; set; }
+
+        public KeyValuePreviewModel? Preview { get; set; } = new()
+        {
+            Name = "users:1",
+            KeyType = "String",
+            Value = "value",
+            ViewerFormat = "text",
+            ValueSizeBytes = 5,
+            Offset = 0,
+            NextOffset = 5,
+            Count = 5,
+            TotalItems = 5,
+            PagingUnit = "bytes",
+            PageMode = "offset"
+        };
+
+        public int? LastPreviewDatabase { get; private set; }
+
+        public string? LastPreviewKey { get; private set; }
+
+        public long? LastPreviewOffset { get; private set; }
+
+        public int? LastPreviewCount { get; private set; }
+
+        public string? LastPreviewCursor { get; private set; }
+
+        public long? LastKeyPageCursor { get; private set; }
+
+        public int? LastKeyPageOffset { get; private set; }
+
+        public int? LastKeyPageSize { get; private set; }
+
         public Task DeleteKeyAsync(int database, string key, CancellationToken cancellationToken = default)
         {
+            if (DeleteException != null)
+            {
+                throw DeleteException;
+            }
+
             LastDeletedKey = key;
             return Task.CompletedTask;
         }
@@ -262,6 +498,14 @@ public class MiddlewareTests
 
         public Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, string? searchPattern, CancellationToken cancellationToken = default) =>
             Task.FromResult(KeyPage);
+
+        public Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
+        {
+            LastKeyPageCursor = cursor;
+            LastKeyPageOffset = pageOffset;
+            LastKeyPageSize = pageSize;
+            return Task.FromResult(KeyPage);
+        }
 
         public Task<IReadOnlyList<KeyspaceModel>> GetKeyspacesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(Keyspaces);
@@ -281,6 +525,21 @@ public class MiddlewareTests
             LastInsertedKey = key;
             LastInsertedValue = value;
             return Task.CompletedTask;
+        }
+
+        public Task<KeyValuePreviewModel?> GetKeyPreviewAsync(int database, string key, long offset, int count, string? cursor, CancellationToken cancellationToken = default)
+        {
+            if (PreviewException != null)
+            {
+                throw PreviewException;
+            }
+
+            LastPreviewDatabase = database;
+            LastPreviewKey = key;
+            LastPreviewOffset = offset;
+            LastPreviewCount = count;
+            LastPreviewCursor = cursor;
+            return Task.FromResult(Preview);
         }
 
         public Task ListPushAsync(int database, string key, string element, CancellationToken cancellationToken = default) => Task.CompletedTask;

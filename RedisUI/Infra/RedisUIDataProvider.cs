@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using RedisUI.Helpers;
@@ -6,7 +7,7 @@ using StackExchange.Redis;
 
 namespace RedisUI.Infra
 {
-    public sealed class RedisUIDataProvider : IRedisUIDataProvider
+    public sealed class RedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider
     {
         private readonly RedisUISettings _settings;
         private readonly Lazy<IConnectionMultiplexer>? _ownedConnection;
@@ -36,42 +37,128 @@ namespace RedisUI.Infra
 
         public async Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, string? searchPattern, CancellationToken cancellationToken = default)
         {
+            return await GetKeysAsync(database, cursor, pageSize, 0, searchPattern, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
+        {
             var redisDb = GetDatabase(database);
-            RedisResult result;
+            var keys = new List<KeyModel>(pageSize);
+            var scanCursor = cursor;
+            var scanOffset = Math.Max(0, pageOffset);
+            var scanIterations = 0;
+            var maxScanIterations = Math.Max(1, _settings.MaxScanIterationsPerPage);
 
-            if (string.IsNullOrWhiteSpace(searchPattern))
+            while (keys.Count < pageSize && scanIterations < maxScanIterations)
             {
-                result = await redisDb.ExecuteAsync("SCAN", cursor.ToString(), "COUNT", pageSize.ToString()).ConfigureAwait(false);
-            }
-            else
-            {
-                result = await redisDb.ExecuteAsync("SCAN", cursor.ToString(), "MATCH", searchPattern, "COUNT", pageSize.ToString()).ConfigureAwait(false);
-            }
+                scanIterations++;
+                RedisResult result;
 
-            var innerResult = TryGetResultArray(result);
-            if (innerResult.Length < 2)
-            {
-                return new KeyPageModel();
-            }
+                if (string.IsNullOrWhiteSpace(searchPattern))
+                {
+                    result = await redisDb.ExecuteAsync("SCAN", scanCursor.ToString(CultureInfo.InvariantCulture), "COUNT", pageSize.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+                }
+                else
+                {
+                    result = await redisDb.ExecuteAsync("SCAN", scanCursor.ToString(CultureInfo.InvariantCulture), "MATCH", searchPattern, "COUNT", pageSize.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+                }
 
-            var keyNames = TryGetResultArray(innerResult[1])
-                .Select(x => x.ToString() ?? string.Empty)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToList();
+                var innerResult = TryGetResultArray(result);
+                if (innerResult.Length < 2)
+                {
+                    return new KeyPageModel();
+                }
 
-            var keys = new List<KeyModel>(keyNames.Count);
-            foreach (var keyName in keyNames)
-            {
-                keys.Add(await BuildKeyAsync(redisDb, keyName).ConfigureAwait(false));
+                var keyNames = TryGetResultArray(innerResult[1])
+                    .Select(x => x.ToString() ?? string.Empty)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToList();
+                var effectiveOffset = Math.Min(scanOffset, keyNames.Count);
+                var availableKeyNames = keyNames.Skip(effectiveOffset).ToList();
+                var remainingPageSize = pageSize - keys.Count;
+                var selectedKeyNames = availableKeyNames.Take(remainingPageSize).ToList();
+
+                foreach (var keyName in selectedKeyNames)
+                {
+                    keys.Add(await BuildKeyMetadataAsync(redisDb, keyName).ConfigureAwait(false));
+                }
+
+                if (availableKeyNames.Count > selectedKeyNames.Count)
+                {
+                    return new KeyPageModel
+                    {
+                        Keys = keys,
+                        NextCursor = scanCursor,
+                        NextPageOffset = effectiveOffset + selectedKeyNames.Count
+                    };
+                }
+
+                if (!long.TryParse(innerResult[0].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCursor))
+                {
+                    nextCursor = 0;
+                }
+
+                if (keys.Count >= pageSize)
+                {
+                    return new KeyPageModel
+                    {
+                        Keys = keys,
+                        NextCursor = nextCursor,
+                        NextPageOffset = 0
+                    };
+                }
+
+                if (nextCursor == 0)
+                {
+                    return new KeyPageModel
+                    {
+                        Keys = keys,
+                        NextCursor = 0,
+                        NextPageOffset = 0
+                    };
+                }
+
+                scanCursor = nextCursor;
+                scanOffset = 0;
             }
 
             return new KeyPageModel
             {
                 Keys = keys,
-                NextCursor = keys.Count > 0 && long.TryParse(innerResult[0].ToString(), out var nextCursor)
-                    ? nextCursor
-                    : 0
+                NextCursor = scanCursor,
+                NextPageOffset = scanOffset
             };
+        }
+
+        public async Task<KeyValuePreviewModel?> GetKeyPreviewAsync(
+            int database,
+            string key,
+            long offset,
+            int count,
+            string? cursor,
+            CancellationToken cancellationToken = default)
+        {
+            var redisDb = GetDatabase(database);
+            var keyType = await redisDb.KeyTypeAsync(key).ConfigureAwait(false);
+            if (keyType == RedisType.None)
+            {
+                return null;
+            }
+
+            var ttl = await redisDb.KeyTimeToLiveAsync(key).ConfigureAwait(false);
+            KeyValuePreviewModel preview = keyType switch
+            {
+                RedisType.String => await CreateStringPreviewAsync(redisDb, key, keyType, offset, count).ConfigureAwait(false),
+                RedisType.Hash => await CreateHashPreviewAsync(redisDb, key, keyType, offset, count, cursor).ConfigureAwait(false),
+                RedisType.List => await CreateListPreviewAsync(redisDb, key, keyType, offset, count).ConfigureAwait(false),
+                RedisType.Set => await CreateSetPreviewAsync(redisDb, key, keyType, offset, count, cursor).ConfigureAwait(false),
+                RedisType.SortedSet => await CreateSortedSetPreviewAsync(redisDb, key, keyType, offset, count).ConfigureAwait(false),
+                RedisType.Stream => await CreateStreamPreviewAsync(redisDb, key, keyType, offset, count, cursor).ConfigureAwait(false),
+                _ => CreateUnsupportedPreview(key, keyType)
+            };
+
+            preview.TTLSeconds = ttl.HasValue ? (long)Math.Ceiling(ttl.Value.TotalSeconds) : (long?)null;
+            return preview;
         }
 
         public async Task<StatisticsVm> GetStatisticsAsync(CancellationToken cancellationToken = default)
@@ -165,41 +252,214 @@ namespace RedisUI.Infra
             }
         }
 
-        private async Task<KeyModel> BuildKeyAsync(IDatabase redisDb, string keyName)
+        private async Task<KeyModel> BuildKeyMetadataAsync(IDatabase redisDb, string keyName)
         {
             var keyType = await redisDb.KeyTypeAsync(keyName).ConfigureAwait(false);
             var ttl = await redisDb.KeyTimeToLiveAsync(keyName).ConfigureAwait(false);
 
-            var model = keyType switch
+            return new KeyModel
             {
-                RedisType.String => CreateStringKeyModel(keyName, keyType, await redisDb.StringGetAsync(keyName).ConfigureAwait(false), "light"),
-                RedisType.Hash => CreateStructuredKeyModel(keyName, keyType, await redisDb.HashGetAllAsync(keyName).ConfigureAwait(false), "success"),
-                RedisType.List => CreateStructuredKeyModel(keyName, keyType, await redisDb.ListRangeAsync(keyName).ConfigureAwait(false), "warning"),
-                RedisType.Set => CreateStructuredKeyModel(keyName, keyType, await redisDb.SetMembersAsync(keyName).ConfigureAwait(false), "primary"),
-                RedisType.SortedSet => CreateSortedSetKeyModel(keyName, keyType, await redisDb.SortedSetRangeByRankWithScoresAsync(keyName).ConfigureAwait(false)),
-                RedisType.Stream => CreateStreamKeyModel(keyName, keyType, await redisDb.StreamRangeAsync(keyName).ConfigureAwait(false)),
-                RedisType.None => new KeyModel
-                {
-                    Name = keyName,
-                    KeyType = keyType.ToString(),
-                    Value = string.Empty,
-                    Badge = "secondary",
-                    ViewerFormat = "text",
-                    ValueSizeBytes = 0
-                },
-                _ => new KeyModel
-                {
-                    Name = keyName,
-                    KeyType = keyType.ToString(),
-                    Value = "(preview unavailable for this Redis type)",
-                    Badge = "secondary",
-                    ViewerFormat = "text",
-                    ValueSizeBytes = 0
-                }
+                Name = keyName,
+                KeyType = keyType.ToString(),
+                Badge = GetBadge(keyType),
+                ViewerFormat = keyType == RedisType.String ? "text" : "json",
+                ValueSizeBytes = await GetKeySizeBytesAsync(redisDb, keyName, keyType).ConfigureAwait(false),
+                TTLSeconds = ttl.HasValue ? (long)Math.Ceiling(ttl.Value.TotalSeconds) : (long?)null
+            };
+        }
+
+        private async Task<KeyValuePreviewModel> CreateStringPreviewAsync(IDatabase redisDb, string keyName, RedisType keyType, long offset, int requestedCount)
+        {
+            var totalBytes = await redisDb.StringLengthAsync(keyName).ConfigureAwait(false);
+            var count = GetStringPreviewCount(requestedCount);
+            var safeOffset = ClampOffset(offset, totalBytes);
+            var value = RedisValue.Null;
+
+            if (safeOffset < totalBytes)
+            {
+                var end = Math.Min(totalBytes - 1, safeOffset + count - 1);
+                value = await redisDb.StringGetRangeAsync(keyName, safeOffset, end).ConfigureAwait(false);
+            }
+
+            var model = CreateStringKeyModel(keyName, keyType, value, GetBadge(keyType));
+            var nextOffset = Math.Min(totalBytes, safeOffset + count);
+            var isFullValue = safeOffset == 0 && nextOffset >= totalBytes;
+            if (model.ViewerFormat == "json" && !isFullValue)
+            {
+                model.ViewerFormat = "text";
+            }
+
+            return ToPreview(
+                model,
+                totalBytes,
+                safeOffset,
+                nextOffset,
+                count,
+                totalBytes,
+                nextOffset < totalBytes,
+                "offset",
+                "bytes");
+        }
+
+        private async Task<KeyValuePreviewModel> CreateListPreviewAsync(IDatabase redisDb, string keyName, RedisType keyType, long offset, int requestedCount)
+        {
+            var totalItems = await redisDb.ListLengthAsync(keyName).ConfigureAwait(false);
+            var count = GetCollectionPreviewCount(requestedCount);
+            var safeOffset = ClampOffset(offset, totalItems);
+            var values = Array.Empty<RedisValue>();
+
+            if (safeOffset < totalItems)
+            {
+                var end = Math.Min(totalItems - 1, safeOffset + count - 1);
+                values = await redisDb.ListRangeAsync(keyName, safeOffset, end).ConfigureAwait(false);
+            }
+
+            var model = CreateStructuredKeyModel(keyName, keyType, values, GetBadge(keyType));
+            var nextOffset = Math.Min(totalItems, safeOffset + values.LongLength);
+
+            return ToPreview(
+                model,
+                await GetKeySizeBytesAsync(redisDb, keyName, keyType).ConfigureAwait(false),
+                safeOffset,
+                nextOffset,
+                count,
+                totalItems,
+                nextOffset < totalItems,
+                "offset",
+                "items");
+        }
+
+        private async Task<KeyValuePreviewModel> CreateHashPreviewAsync(IDatabase redisDb, string keyName, RedisType keyType, long offset, int requestedCount, string? cursor)
+        {
+            var totalItems = await redisDb.HashLengthAsync(keyName).ConfigureAwait(false);
+            var count = GetCollectionPreviewCount(requestedCount);
+            var currentCursor = ParseRedisCursor(cursor);
+            var result = await redisDb.ExecuteAsync("HSCAN", keyName, currentCursor.ToString(CultureInfo.InvariantCulture), "COUNT", count.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+            var innerResult = TryGetResultArray(result);
+            var nextCursor = innerResult.Length > 0 ? innerResult[0].ToString() ?? "0" : "0";
+            var entryResults = innerResult.Length > 1 ? TryGetResultArray(innerResult[1]) : Array.Empty<RedisResult>();
+            var entries = new List<HashEntry>(entryResults.Length / 2);
+
+            for (var index = 0; index + 1 < entryResults.Length; index += 2)
+            {
+                entries.Add(new HashEntry(ToRedisValue(entryResults[index]), ToRedisValue(entryResults[index + 1])));
+            }
+
+            var model = CreateStructuredKeyModel(keyName, keyType, entries.ToArray(), GetBadge(keyType));
+            var safeOffset = Math.Max(0, offset);
+            var nextOffset = Math.Min(totalItems, safeOffset + entries.Count);
+
+            return ToPreview(
+                model,
+                await GetKeySizeBytesAsync(redisDb, keyName, keyType).ConfigureAwait(false),
+                safeOffset,
+                nextOffset,
+                count,
+                totalItems,
+                nextCursor != "0",
+                "cursor",
+                "items",
+                cursor ?? string.Empty,
+                nextCursor == "0" ? string.Empty : nextCursor);
+        }
+
+        private async Task<KeyValuePreviewModel> CreateSetPreviewAsync(IDatabase redisDb, string keyName, RedisType keyType, long offset, int requestedCount, string? cursor)
+        {
+            var totalItems = await redisDb.SetLengthAsync(keyName).ConfigureAwait(false);
+            var count = GetCollectionPreviewCount(requestedCount);
+            var currentCursor = ParseRedisCursor(cursor);
+            var result = await redisDb.ExecuteAsync("SSCAN", keyName, currentCursor.ToString(CultureInfo.InvariantCulture), "COUNT", count.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
+            var innerResult = TryGetResultArray(result);
+            var nextCursor = innerResult.Length > 0 ? innerResult[0].ToString() ?? "0" : "0";
+            var valueResults = innerResult.Length > 1 ? TryGetResultArray(innerResult[1]) : Array.Empty<RedisResult>();
+            var values = valueResults.Select(ToRedisValue).ToArray();
+
+            var model = CreateStructuredKeyModel(keyName, keyType, values, GetBadge(keyType));
+            var safeOffset = Math.Max(0, offset);
+            var nextOffset = Math.Min(totalItems, safeOffset + values.LongLength);
+
+            return ToPreview(
+                model,
+                await GetKeySizeBytesAsync(redisDb, keyName, keyType).ConfigureAwait(false),
+                safeOffset,
+                nextOffset,
+                count,
+                totalItems,
+                nextCursor != "0",
+                "cursor",
+                "items",
+                cursor ?? string.Empty,
+                nextCursor == "0" ? string.Empty : nextCursor);
+        }
+
+        private async Task<KeyValuePreviewModel> CreateSortedSetPreviewAsync(IDatabase redisDb, string keyName, RedisType keyType, long offset, int requestedCount)
+        {
+            var totalItems = await redisDb.SortedSetLengthAsync(keyName).ConfigureAwait(false);
+            var count = GetCollectionPreviewCount(requestedCount);
+            var safeOffset = ClampOffset(offset, totalItems);
+            var entries = Array.Empty<SortedSetEntry>();
+
+            if (safeOffset < totalItems)
+            {
+                var end = Math.Min(totalItems - 1, safeOffset + count - 1);
+                entries = await redisDb.SortedSetRangeByRankWithScoresAsync(keyName, safeOffset, end).ConfigureAwait(false);
+            }
+
+            var model = CreateSortedSetKeyModel(keyName, keyType, entries);
+            var nextOffset = Math.Min(totalItems, safeOffset + entries.LongLength);
+
+            return ToPreview(
+                model,
+                await GetKeySizeBytesAsync(redisDb, keyName, keyType).ConfigureAwait(false),
+                safeOffset,
+                nextOffset,
+                count,
+                totalItems,
+                nextOffset < totalItems,
+                "offset",
+                "items");
+        }
+
+        private async Task<KeyValuePreviewModel> CreateStreamPreviewAsync(IDatabase redisDb, string keyName, RedisType keyType, long offset, int requestedCount, string? cursor)
+        {
+            var totalItems = await redisDb.StreamLengthAsync(keyName).ConfigureAwait(false);
+            var count = GetCollectionPreviewCount(requestedCount);
+            RedisValue? minId = string.IsNullOrWhiteSpace(cursor) ? null : "(" + cursor;
+            var entries = await redisDb.StreamRangeAsync(keyName, minId, null, count + 1, Order.Ascending).ConfigureAwait(false);
+            var pageEntries = entries.Length > count ? entries.Take(count).ToArray() : entries;
+            var hasMore = entries.Length > count;
+            var nextCursor = hasMore && pageEntries.Length > 0 ? pageEntries[^1].Id.ToString() : string.Empty;
+            var model = CreateStreamKeyModel(keyName, keyType, pageEntries);
+            var safeOffset = Math.Max(0, offset);
+            var nextOffset = Math.Min(totalItems, safeOffset + pageEntries.LongLength);
+
+            return ToPreview(
+                model,
+                await GetKeySizeBytesAsync(redisDb, keyName, keyType).ConfigureAwait(false),
+                safeOffset,
+                nextOffset,
+                count,
+                totalItems,
+                hasMore,
+                "cursor",
+                "items",
+                cursor ?? string.Empty,
+                nextCursor);
+        }
+
+        private static KeyValuePreviewModel CreateUnsupportedPreview(string keyName, RedisType keyType)
+        {
+            var model = new KeyModel
+            {
+                Name = keyName,
+                KeyType = keyType.ToString(),
+                Value = "(preview unavailable for this Redis type)",
+                Badge = GetBadge(keyType),
+                ViewerFormat = "text",
+                ValueSizeBytes = 0
             };
 
-            model.TTLSeconds = ttl.HasValue ? (long)Math.Ceiling(ttl.Value.TotalSeconds) : (long?)null;
-            return model;
+            return ToPreview(model, 0, 0, 0, 0, 0, false, "offset", "items");
         }
 
         private static KeyModel CreateStringKeyModel(string keyName, RedisType keyType, RedisValue value, string badge)
@@ -305,6 +565,120 @@ namespace RedisUI.Infra
                 ViewerFormat = "json",
                 ValueSizeBytes = entries.Sum(e => e.Values.Sum(v => GetSizeBytes(v.Value)))
             };
+        }
+
+        private async Task<long> GetKeySizeBytesAsync(IDatabase redisDb, string keyName, RedisType keyType)
+        {
+            if (keyType == RedisType.String)
+            {
+                return await redisDb.StringLengthAsync(keyName).ConfigureAwait(false);
+            }
+
+            try
+            {
+                return ToInt64(await redisDb.ExecuteAsync("MEMORY", "USAGE", keyName).ConfigureAwait(false));
+            }
+            catch (RedisServerException)
+            {
+                return 0;
+            }
+        }
+
+        private int GetCollectionPreviewCount(int requestedCount)
+        {
+            var defaultCount = Math.Max(1, _settings.ValuePreviewPageSize);
+            var maxCount = Math.Max(1, _settings.MaxValuePreviewPageSize);
+            var count = requestedCount > 0 ? requestedCount : defaultCount;
+
+            return Math.Min(Math.Max(1, count), maxCount);
+        }
+
+        private int GetStringPreviewCount(int requestedCount)
+        {
+            var defaultCount = Math.Max(1, _settings.StringPreviewBytes);
+            var maxCount = Math.Max(1, _settings.MaxStringPreviewBytes);
+            var count = requestedCount > 0 ? requestedCount : defaultCount;
+
+            return Math.Min(Math.Max(1, count), maxCount);
+        }
+
+        private static long ClampOffset(long offset, long totalItems) =>
+            totalItems <= 0 ? 0 : Math.Min(Math.Max(0, offset), totalItems);
+
+        private static long ParseRedisCursor(string? cursor) =>
+            long.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0
+                ? parsed
+                : 0;
+
+        private static KeyValuePreviewModel ToPreview(
+            KeyModel model,
+            long valueSizeBytes,
+            long offset,
+            long nextOffset,
+            int count,
+            long totalItems,
+            bool hasMore,
+            string pageMode,
+            string pagingUnit,
+            string cursor = "",
+            string nextCursor = "")
+        {
+            return new KeyValuePreviewModel
+            {
+                Name = model.Name,
+                KeyType = model.KeyType,
+                Value = model.Value,
+                Base64Value = model.Base64Value,
+                ViewerFormat = model.ViewerFormat,
+                ValueSizeBytes = valueSizeBytes,
+                Offset = offset,
+                NextOffset = nextOffset,
+                Count = count,
+                TotalItems = totalItems,
+                PagingUnit = pagingUnit,
+                PageMode = pageMode,
+                Cursor = cursor,
+                NextCursor = nextCursor,
+                HasMore = hasMore
+            };
+        }
+
+        private static string GetBadge(RedisType keyType) =>
+            keyType switch
+            {
+                RedisType.String => "light",
+                RedisType.Hash => "success",
+                RedisType.List => "warning",
+                RedisType.Set => "primary",
+                RedisType.SortedSet => "info",
+                RedisType.Stream => "dark",
+                _ => "secondary"
+            };
+
+        private static RedisValue ToRedisValue(RedisResult result)
+        {
+            try
+            {
+                return (RedisValue)result;
+            }
+            catch (InvalidCastException)
+            {
+                return result.ToString() ?? RedisValue.Null;
+            }
+        }
+
+        private static long ToInt64(RedisResult result)
+        {
+            try
+            {
+                return (long)result;
+            }
+            catch (InvalidCastException)
+            {
+                return long.TryParse(result.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                    ? parsed
+                    : 0;
+            }
         }
 
         private static object FormatValueElement(RedisValue value)
