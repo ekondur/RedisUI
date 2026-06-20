@@ -59,5 +59,30 @@ namespace RedisUI
         /// Gets or sets the maximum allowed page size.
         /// </summary>
         public int MaxPageSize { get; set; } = 1000;
+
+        /// <summary>
+        /// Gets or sets the maximum number of SCAN calls allowed while building a single key page.
+        /// </summary>
+        public int MaxScanIterationsPerPage { get; set; } = 10;
+
+        /// <summary>
+        /// Gets or sets the default number of collection items fetched for a value preview.
+        /// </summary>
+        public int ValuePreviewPageSize { get; set; } = 50;
+
+        /// <summary>
+        /// Gets or sets the maximum number of collection items allowed in a single value preview request.
+        /// </summary>
+        public int MaxValuePreviewPageSize { get; set; } = 500;
+
+        /// <summary>
+        /// Gets or sets the default number of string bytes fetched for a value preview.
+        /// </summary>
+        public int StringPreviewBytes { get; set; } = 4096;
+
+        /// <summary>
+        /// Gets or sets the maximum number of string bytes allowed in a single value preview request.
+        /// </summary>
+        public int MaxStringPreviewBytes { get; set; } = 65536;
     }
 }

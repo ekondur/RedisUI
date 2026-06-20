@@ -14,6 +14,8 @@ namespace RedisUI
     public class RedisUIMiddleware : IDisposable
     {
         private const int DefaultPageSize = 10;
+        private const string RequestFailedMessage = "RedisUI request failed.";
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
         private readonly RequestDelegate _next;
         private readonly RedisUISettings _settings;
         private readonly IRedisUIDataProvider _dataProvider;
@@ -48,7 +50,9 @@ namespace RedisUI
             }
 
             var subPath = remainingPath.Value?.TrimEnd('/') ?? string.Empty;
-            if (subPath.Length > 0 && !string.Equals(subPath, "/statistics", StringComparison.OrdinalIgnoreCase))
+            if (subPath.Length > 0 &&
+                !string.Equals(subPath, "/statistics", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(subPath, "/value", StringComparison.OrdinalIgnoreCase))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;
@@ -75,9 +79,21 @@ namespace RedisUI
                 return;
             }
 
+            if (string.Equals(subPath, "/value", StringComparison.OrdinalIgnoreCase))
+            {
+                await TryHandleValuePreviewAsync(context, currentDb).ConfigureAwait(false);
+                return;
+            }
+
             if (!TryParseLong(context.Request.Query["page"].ToString(), 0, out var cursor))
             {
                 await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'page' query parameter.");
+                return;
+            }
+
+            if (!TryParseInt(context.Request.Query["offset"].ToString(), 0, out var pageOffset))
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'offset' query parameter.");
                 return;
             }
 
@@ -130,9 +146,12 @@ namespace RedisUI
             }
 
             var searchKey = context.Request.Query["key"].ToString();
-            var keyPage = await _dataProvider.GetKeysAsync(currentDb, cursor, pageSize, searchKey, context.RequestAborted).ConfigureAwait(false);
+            var keyPage = _dataProvider is IRedisUIKeyPageProvider keyPageProvider
+                ? await keyPageProvider.GetKeysAsync(currentDb, cursor, pageSize, pageOffset, searchKey, context.RequestAborted).ConfigureAwait(false)
+                : await _dataProvider.GetKeysAsync(currentDb, cursor, pageSize, searchKey, context.RequestAborted).ConfigureAwait(false);
+            var visibleKeys = keyPage.Keys.Take(pageSize).ToList();
 
-            layoutModel.Section = Main.Build(keyPage.Keys, keyPage.NextCursor);
+            layoutModel.Section = Main.Build(visibleKeys, keyPage.NextCursor, keyPage.NextPageOffset, _settings);
             await WriteHtmlAsync(context, Layout.Build(layoutModel, _settings)).ConfigureAwait(false);
         }
 
@@ -198,6 +217,27 @@ namespace RedisUI
             return false;
         }
 
+        private bool TryParsePreviewCount(string? value, out int count)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                count = 0;
+                return true;
+            }
+
+            var maxCount = Math.Max(
+                Math.Max(1, _settings.MaxValuePreviewPageSize),
+                Math.Max(1, _settings.MaxStringPreviewBytes));
+
+            if (int.TryParse(value, out count) && count > 0 && count <= maxCount)
+            {
+                return true;
+            }
+
+            count = 0;
+            return false;
+        }
+
         private string EnsureAntiForgeryToken(HttpContext context)
         {
             if (!context.Request.Cookies.TryGetValue(_settings.AntiForgeryCookieName, out var antiForgeryToken) || string.IsNullOrWhiteSpace(antiForgeryToken))
@@ -237,6 +277,60 @@ namespace RedisUI
 
             return cookieBytes.Length == headerBytes.Length &&
                    CryptographicOperations.FixedTimeEquals(cookieBytes, headerBytes);
+        }
+
+        private async Task TryHandleValuePreviewAsync(HttpContext context, int currentDb)
+        {
+            if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+            {
+                context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+                context.Response.Headers.Allow = "GET, HEAD";
+                return;
+            }
+
+            var key = context.Request.Query["key"].ToString();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "The 'key' query parameter is required.").ConfigureAwait(false);
+                return;
+            }
+
+            if (!TryParseLong(context.Request.Query["offset"].ToString(), 0, out var offset))
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'offset' query parameter.").ConfigureAwait(false);
+                return;
+            }
+
+            if (!TryParsePreviewCount(context.Request.Query["count"].ToString(), out var count))
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'count' query parameter.").ConfigureAwait(false);
+                return;
+            }
+
+            if (_dataProvider is not IRedisUIValuePreviewProvider valuePreviewProvider)
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status501NotImplemented, "The configured RedisUI data provider does not support lazy value previews.").ConfigureAwait(false);
+                return;
+            }
+
+            try
+            {
+                var preview = await valuePreviewProvider
+                    .GetKeyPreviewAsync(currentDb, key, offset, count, context.Request.Query["cursor"].ToString(), context.RequestAborted)
+                    .ConfigureAwait(false);
+
+                if (preview == null)
+                {
+                    await WritePlainTextAsync(context, StatusCodes.Status404NotFound, "Redis key was not found.").ConfigureAwait(false);
+                    return;
+                }
+
+                await WriteJsonAsync(context, preview).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await WritePlainTextAsync(context, StatusCodes.Status500InternalServerError, RequestFailedMessage).ConfigureAwait(false);
+            }
         }
 
         private async Task<bool> TryHandleMutationAsync(HttpContext context, int currentDb)
@@ -354,7 +448,7 @@ namespace RedisUI
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await WritePlainTextAsync(context, StatusCodes.Status500InternalServerError, ex.Message).ConfigureAwait(false);
+                await WritePlainTextAsync(context, StatusCodes.Status500InternalServerError, RequestFailedMessage).ConfigureAwait(false);
                 return false;
             }
 
@@ -368,6 +462,16 @@ namespace RedisUI
             if (!HttpMethods.IsHead(context.Request.Method))
             {
                 await context.Response.WriteAsync(html).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task WriteJsonAsync<T>(HttpContext context, T payload)
+        {
+            context.Response.ContentType = "application/json; charset=utf-8";
+
+            if (!HttpMethods.IsHead(context.Request.Method))
+            {
+                await context.Response.WriteAsync(JsonSerializer.Serialize(payload, JsonOptions)).ConfigureAwait(false);
             }
         }
 

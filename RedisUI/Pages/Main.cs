@@ -10,10 +10,12 @@ namespace RedisUI.Pages
 {
     public static class Main
     {
-        public static string Build(System.Collections.Generic.List<KeyModel> keys, long next)
+        public static string Build(System.Collections.Generic.List<KeyModel> keys, long next, int nextPageOffset, RedisUISettings settings)
         {
             var encoder = HtmlEncoder.Default;
             var tbody = new StringBuilder();
+            var stringPreviewCount = System.Math.Max(1, settings.StringPreviewBytes);
+            var collectionPreviewCount = System.Math.Max(1, settings.ValuePreviewPageSize);
 
             for (var index = 0; index < keys.Count; index++)
             {
@@ -28,9 +30,7 @@ namespace RedisUI.Pages
             var keyPayload = JsonSerializer.Serialize(keys.Select(x => new
             {
                 name = x.Name,
-                value = x.Value,
-                base64Value = x.Base64Value,
-                viewerFormat = x.ViewerFormat,
+                keyType = x.KeyType,
                 valueSizeBytes = x.ValueSizeBytes,
                 ttlSeconds = x.TTLSeconds
             }));
@@ -84,13 +84,14 @@ namespace RedisUI.Pages
                     <span class=""small text-muted"" id=""valueMeta"">Click on a key to inspect its value.</span>
                 </div>
                 <div class=""card-body"">
-                    <div class=""d-flex gap-2 mb-2"">
-                        <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""expandValue"" hidden>Expand</button>
-                        <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""collapseValue"" hidden>Collapse</button>
+                    <div class=""d-flex gap-2 mb-2 align-items-center d-none"" id=""previewPager"">
+                        <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""prevValuePage"">Previous</button>
+                        <button type=""button"" class=""btn btn-sm btn-outline-secondary"" id=""nextValuePage"">Next</button>
+                        <span class=""small text-muted"" id=""previewPageMeta""></span>
                     </div>
                     <pre id=""valueContent"" class=""mb-0"">Click on a key to get value...</pre>
                 </div>
-                <div class=""card-footer d-flex align-items-center gap-2 flex-wrap"" id=""expirySection"" hidden>
+                <div class=""card-footer d-flex align-items-center gap-2 flex-wrap d-none"" id=""expirySection"">
                     <span class=""small text-muted"">Expiry:</span>
                     <input type=""number"" class=""form-control form-control-sm"" id=""expiryInput"" placeholder=""seconds"" min=""1"" style=""width:110px"">
                     <button type=""button"" class=""btn btn-sm btn-outline-warning"" id=""btnSetExpiry"">Set</button>
@@ -103,13 +104,19 @@ namespace RedisUI.Pages
 <script>
     document.addEventListener('DOMContentLoaded', function () {{
         const keyData = {keyPayload};
-        const maxPreviewChars = 4000;
+        const stringPreviewCount = {stringPreviewCount};
+        const collectionPreviewCount = {collectionPreviewCount};
         let currentPage = 0;
         let currentDb = 0;
         let currentKey = '';
         let currentSize = 10;
+        let currentOffset = 0;
         let selectedIndex = null;
-        let isExpanded = false;
+        let previewOffset = 0;
+        let previewCursor = '';
+        let previewHistory = [];
+        let currentPreview = null;
+        let previewRequestId = 0;
         let filterExpiring = false;
 
         const searchParams = new URLSearchParams(window.location.search);
@@ -117,11 +124,15 @@ namespace RedisUI.Pages
         const paramDb = searchParams.get('db');
         const paramKey = searchParams.get('key');
         const paramSize = searchParams.get('size');
+        const paramOffset = searchParams.get('offset');
         const nextCursor = {next};
+        const nextOffset = {nextPageOffset};
         const valueContent = document.getElementById('valueContent');
         const valueMeta = document.getElementById('valueMeta');
-        const expandValueButton = document.getElementById('expandValue');
-        const collapseValueButton = document.getElementById('collapseValue');
+        const previewPager = document.getElementById('previewPager');
+        const prevValuePageButton = document.getElementById('prevValuePage');
+        const nextValuePageButton = document.getElementById('nextValuePage');
+        const previewPageMeta = document.getElementById('previewPageMeta');
 
         if (paramPage) {{
             currentPage = Number(paramPage);
@@ -139,15 +150,19 @@ namespace RedisUI.Pages
             currentSize = Number(paramSize);
         }}
 
+        if (paramOffset) {{
+            currentOffset = Number(paramOffset);
+        }}
+
         const paginationContainer = document.getElementById('pagination');
         const nextButton = document.createElement('button');
-        nextButton.innerText = nextCursor === 0 ? 'Back to top' : 'Next';
+        nextButton.innerText = nextCursor === 0 && nextOffset === 0 ? 'Back to top' : 'Next';
         nextButton.className = 'btn btn-outline-success';
         nextButton.id = 'btnNext';
         nextButton.addEventListener('click', function () {{
-            window.location = window.buildRedisUiUrl({{ page: nextCursor, db: currentDb, key: currentKey, size: currentSize }});
+            window.location = window.buildRedisUiUrl({{ page: nextCursor, offset: nextOffset, db: currentDb, key: currentKey, size: currentSize }});
         }});
-        nextButton.hidden = nextCursor === currentPage;
+        nextButton.hidden = nextCursor === currentPage && nextOffset === currentOffset;
         paginationContainer.replaceChildren(nextButton);
 
         const searchContainer = document.getElementById('search');
@@ -213,8 +228,11 @@ namespace RedisUI.Pages
         document.querySelectorAll('#redisTable tbody tr.redis-row').forEach(function (row) {{
             row.addEventListener('click', function () {{
                 selectedIndex = Number(row.dataset.index);
-                isExpanded = false;
-                renderSelectedValue();
+                previewOffset = 0;
+                previewCursor = '';
+                previewHistory = [];
+                currentPreview = null;
+                loadSelectedValue();
             }});
         }});
 
@@ -244,14 +262,32 @@ namespace RedisUI.Pages
             }});
         }});
 
-        expandValueButton.addEventListener('click', function () {{
-            isExpanded = true;
-            renderSelectedValue();
+        nextValuePageButton.addEventListener('click', function () {{
+            if (!currentPreview || !currentPreview.hasMore) {{
+                return;
+            }}
+
+            previewHistory.push({{ offset: previewOffset, cursor: previewCursor }});
+            if (currentPreview.pageMode === 'cursor') {{
+                previewCursor = currentPreview.nextCursor || '';
+                previewOffset = currentPreview.nextOffset || previewOffset;
+            }} else {{
+                previewCursor = '';
+                previewOffset = currentPreview.nextOffset || previewOffset;
+            }}
+
+            loadSelectedValue();
         }});
 
-        collapseValueButton.addEventListener('click', function () {{
-            isExpanded = false;
-            renderSelectedValue();
+        prevValuePageButton.addEventListener('click', function () {{
+            const previous = previewHistory.pop();
+            if (!previous) {{
+                return;
+            }}
+
+            previewOffset = previous.offset || 0;
+            previewCursor = previous.cursor || '';
+            loadSelectedValue();
         }});
 
         const navElement = document.getElementById('nav' + currentDb);
@@ -306,7 +342,7 @@ namespace RedisUI.Pages
         saveButton.addEventListener('click', saveKey);
         updateSaveState();
 
-        function renderSelectedValue() {{
+        function loadSelectedValue() {{
             if (selectedIndex === null) {{
                 return;
             }}
@@ -316,38 +352,115 @@ namespace RedisUI.Pages
                 return;
             }}
 
-            let content = '';
-            let meta = key.valueSizeBytes + ' bytes';
+            const requestId = ++previewRequestId;
+            valueContent.textContent = 'Loading preview...';
+            valueMeta.textContent = buildBaseMeta(key) + ' | loading';
+            setVisible(previewPager, false);
+            setVisible(expirySection, true);
+            expiryInput.value = (key.ttlSeconds !== null && key.ttlSeconds !== undefined) ? key.ttlSeconds : '';
 
-            if (key.viewerFormat === 'binary') {{
-                content = key.base64Value || '';
-                meta = meta + ' | binary-safe base64 view';
-            }} else if (key.viewerFormat === 'json') {{
-                content = prettyPrintJson(key.value);
-                meta = meta + ' | JSON';
+            fetch(buildValuePreviewUrl(key))
+                .then(function (response) {{
+                    if (requestId !== previewRequestId) {{
+                        return;
+                    }}
+
+                    if (response.ok) {{
+                        response.json().then(function (preview) {{
+                            if (requestId === previewRequestId) {{
+                                renderSelectedValue(preview);
+                            }}
+                        }});
+                        return;
+                    }}
+
+                    response.text().then(function (message) {{
+                        if (requestId === previewRequestId) {{
+                            renderPreviewError(message || 'RedisUI preview request failed.');
+                        }}
+                    }});
+                }})
+                .catch(function () {{
+                    if (requestId === previewRequestId) {{
+                        renderPreviewError('RedisUI preview request failed.');
+                    }}
+                }});
+        }}
+
+        function renderSelectedValue(preview) {{
+            currentPreview = preview;
+            let content = '';
+            let meta = preview.valueSizeBytes + ' bytes';
+
+            if (preview.viewerFormat === 'binary') {{
+                content = preview.base64Value || '';
+                meta = meta + ' | binary-safe base64 preview';
+            }} else if (preview.viewerFormat === 'json') {{
+                content = prettyPrintJson(preview.value);
+                meta = meta + ' | JSON preview';
             }} else {{
-                content = key.value || '';
+                content = preview.value || '';
             }}
 
+            if (preview.ttlSeconds !== null && preview.ttlSeconds !== undefined) {{
+                meta = meta + ' | TTL: ' + preview.ttlSeconds + 's';
+            }}
+
+            if (preview.totalItems > 0) {{
+                const start = preview.nextOffset > preview.offset ? preview.offset + 1 : 0;
+                meta = meta + ' | ' + preview.pagingUnit + ': ' + start + '-' + preview.nextOffset + ' of ' + preview.totalItems;
+            }}
+
+            valueContent.textContent = content || '(empty)';
+            valueMeta.textContent = meta;
+            setVisible(previewPager, previewHistory.length > 0 || preview.hasMore);
+            prevValuePageButton.hidden = previewHistory.length === 0;
+            nextValuePageButton.hidden = !preview.hasMore;
+            previewPageMeta.textContent = preview.hasMore ? 'More data available' : 'End of value';
+
+            setVisible(expirySection, true);
+            expiryInput.value = (preview.ttlSeconds !== null && preview.ttlSeconds !== undefined) ? preview.ttlSeconds : '';
+        }}
+
+        function renderPreviewError(message) {{
+            currentPreview = null;
+            valueContent.textContent = message;
+            valueMeta.textContent = 'Preview failed';
+            setVisible(previewPager, false);
+            setVisible(expirySection, false);
+        }}
+
+        function setVisible(element, visible) {{
+            element.classList.toggle('d-none', !visible);
+        }}
+
+        function buildValuePreviewUrl(key) {{
+            const query = new URLSearchParams();
+            query.set('db', String(currentDb));
+            query.set('key', key.name);
+            query.set('offset', String(previewOffset));
+            query.set('count', String(getPreviewCount(key)));
+
+            if (previewCursor) {{
+                query.set('cursor', previewCursor);
+            }}
+
+            return window.redisUi.basePath + '/value?' + query.toString();
+        }}
+
+        function getPreviewCount(key) {{
+            return String(key.keyType || '').toLowerCase() === 'string'
+                ? stringPreviewCount
+                : collectionPreviewCount;
+        }}
+
+        function buildBaseMeta(key) {{
+            let meta = key.valueSizeBytes + ' bytes';
             if (key.ttlSeconds !== null && key.ttlSeconds !== undefined) {{
                 meta = meta + ' | TTL: ' + key.ttlSeconds + 's';
             }}
 
-            const needsTruncation = content.length > maxPreviewChars;
-            const displayValue = needsTruncation && !isExpanded
-                ? content.slice(0, maxPreviewChars) + '\n\n... truncated, expand to view the full value ...'
-                : content;
-
-            valueContent.textContent = displayValue || '(empty)';
-            valueMeta.textContent = needsTruncation
-                ? meta + ' | showing ' + Math.min(content.length, maxPreviewChars) + ' of ' + content.length + ' characters'
-                : meta;
-
-            expandValueButton.hidden = !needsTruncation || isExpanded;
-            collapseValueButton.hidden = !needsTruncation || !isExpanded;
-
-            expirySection.hidden = false;
-            expiryInput.value = (key.ttlSeconds !== null && key.ttlSeconds !== undefined) ? key.ttlSeconds : '';
+            return meta;
         }}
 
         function applyExpiringFilter() {{
@@ -399,7 +512,8 @@ namespace RedisUI.Pages
                 db: currentDb,
                 size: currentSize,
                 key: currentKey,
-                page: currentPage
+                page: currentPage,
+                offset: currentOffset
             }}), {{
                 method: 'POST',
                 body: JSON.stringify(payload),
@@ -413,7 +527,8 @@ namespace RedisUI.Pages
                         db: currentDb,
                         size: currentSize,
                         key: currentKey,
-                        page: currentPage
+                        page: currentPage,
+                        offset: currentOffset
                     }});
                     return;
                 }}

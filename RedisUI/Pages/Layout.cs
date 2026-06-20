@@ -62,12 +62,17 @@ namespace RedisUI.Pages
         const db = hasOwn('db') ? next.db : (current.get('db') || '0');
         const size = hasOwn('size') ? next.size : (current.get('size') || '10');
         const page = hasOwn('page') ? next.page : (current.get('page') || '0');
+        const offset = hasOwn('offset') ? next.offset : (hasOwn('page') ? '0' : (current.get('offset') || '0'));
         const key = hasOwn('key') ? next.key : (current.get('key') || '');
 
         const query = new URLSearchParams();
         query.set('page', String(page));
         query.set('db', String(db));
         query.set('size', String(size));
+
+        if (Number(offset) > 0) {{
+            query.set('offset', String(offset));
+        }}
 
         if (key) {{
             query.set('key', key);
@@ -121,12 +126,12 @@ namespace RedisUI.Pages
         </div>
     </nav>
 
-    <div class=""container"">
+    <main class=""container-fluid px-3 px-lg-4"">
         <br/>
             {model.Section}
-    </div>
+    </main>
 
-    <div class=""container"">
+    <div class=""container-fluid px-3 px-lg-4"">
         <div class=""row"">
         <footer class=""d-flex flex-wrap justify-content-between align-items-center py-3 my-4 border-top"">
             <div class=""col-md-4 d-flex align-items-center"">
