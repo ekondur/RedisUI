@@ -1,0 +1,22 @@
+<section id="keyWorkspace">
+  <div class="toolbar">
+    <form id="searchForm"><label class="sr-only" for="searchInput">Key pattern</label><input id="searchInput" placeholder="Search keys, e.g. users:*" autocomplete="off"><button>Search</button></form>
+    <button id="saveSearch">Save search</button><label>Saved <select id="savedSearches"><option value="">Choose a search</option></select></label><button id="removeSearch">Remove saved</button>
+    <button id="addKey" class="primary">Add key / element</button>
+  </div>
+  <div class="toolbar"><label>Page size <select id="pageSize"></select></label>
+    <label><input id="expiringOnly" type="checkbox"> Expiring keys on this page</label>
+    <button id="refreshKeys">Refresh</button><button id="previousKeys">Previous</button><button id="nextKeys">Next</button>
+    <span id="pageStatus" class="muted"></span>
+  </div>
+  <div class="workspace">
+    <aside class="panel"><h2>Key groups</h2><p class="muted">Colon-separated groups from this page. Select a group to search its prefix.</p><div id="keyTree"></div></aside>
+    <section class="panel key-list" aria-label="Keys"><div class="table-wrap"><table id="redisTable"><thead><tr><th>Type</th><th>Key</th><th>Bytes¹</th><th>TTL</th><th>Actions</th></tr></thead><tbody><!--ROWS--></tbody></table></div><p class="muted">¹ String payload bytes; Redis memory usage for collections. Scanning a changing database may repeat keys.</p></section>
+    <section class="panel inspector"><h2 id="valueTitle">Value inspector</h2><p id="valueMeta" class="muted">Select a key to inspect it.</p>
+      <div class="toolbar"><button id="editString" hidden>Edit value</button><button id="appendElement" hidden>Add element</button><button id="previousValue" hidden>Previous values</button><button id="nextValue" hidden>Next values</button></div>
+      <pre id="valueContent">No key selected.</pre><div id="elementRows"></div>
+      <form id="expiryForm" hidden><label>TTL in seconds <input id="expiryInput" type="number" min="1" max="315360000" required></label><button>Set expiry</button><button id="persistKey" type="button">Make persistent</button></form>
+    </section>
+  </div>
+  <details id="auditPanel" class="panel"><summary>Operation history</summary><p class="muted">Recent operations on this connection and database. Values are not recorded. In-memory history resets when the application restarts.</p><button id="refreshAudit">Refresh history</button><div class="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Operation</th><th>Key</th><th>Result</th></tr></thead><tbody id="auditRows"></tbody></table></div></details>
+</section>

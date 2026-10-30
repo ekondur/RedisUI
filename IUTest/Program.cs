@@ -22,6 +22,7 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
+app.UseAuthorization();
 
 ConfigurationOptions options = new ConfigurationOptions
 {
@@ -30,11 +31,10 @@ ConfigurationOptions options = new ConfigurationOptions
 
 app.UseRedisUI(new RedisUISettings
 {
+    Environment = app.Environment.EnvironmentName,
     AuthorizationFilter = new FooAuthorizationFilter(app.Environment.IsDevelopment()),
     //ConfigurationOptions = options
 });
-
-app.UseAuthorization();
 
 app.MapControllerRoute(
     name: "default",

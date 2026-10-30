@@ -3,6 +3,7 @@
   <PropertyGroup>
 	<TargetFrameworks>net6.0;net8.0;net10.0</TargetFrameworks>
 	<Nullable>enable</Nullable>
+	<LangVersion>11</LangVersion>
 	<ImplicitUsings>enable</ImplicitUsings>
 	<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	  <RootNamespace>RedisUI</RootNamespace>
@@ -27,6 +28,7 @@
 
 	<ItemGroup>
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+		<EmbeddedResource Include="Assets\**\*" />
 	</ItemGroup>
 
 	<ItemGroup>

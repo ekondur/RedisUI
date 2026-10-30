@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 /.dotnet
 /.claude/settings.local.json
+/browser-fixture.html*
+/browser-*.png
+/tests/browser/node_modules/

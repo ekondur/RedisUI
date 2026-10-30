@@ -8,7 +8,7 @@ using Xunit;
 
 namespace RedisUI.Tests;
 
-public class MiddlewareTests
+public partial class MiddlewareTests
 {
     [Fact]
     public async Task InvokeAsync_PassesThrough_ForNonRedisPath()
@@ -297,8 +297,8 @@ public class MiddlewareTests
         await middleware.InvokeAsync(context);
 
         var html = await ReadBodyAsync(context);
-        Assert.Contains("const nextOffset = 10;", html);
-        Assert.Contains("offset: nextOffset", html);
+        Assert.Contains("\"nextPageOffset\":10", html);
+        Assert.Contains("\"nextCursor\":\"0\"", html);
     }
 
     [Fact]
@@ -413,7 +413,7 @@ public class MiddlewareTests
         public bool Authorize(HttpContext context) => false;
     }
 
-    private sealed class FakeRedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider
+    private sealed class FakeRedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider, IRedisUIEditorProvider
     {
         public KeyPageModel KeyPage { get; set; } = new()
         {
@@ -443,9 +443,30 @@ public class MiddlewareTests
 
         public string? LastInsertedValue { get; private set; }
 
+        public string? LastExpiryMode { get; private set; }
+        public string? LastExpectedValue { get; private set; }
+        public bool WriteConflict { get; set; }
+        public bool ElementCalled { get; private set; }
+
+        public async Task<bool> WriteStringAsync(int database, string key, string value, string expiryMode, long? ttlSeconds, string? expectedValue, CancellationToken cancellationToken = default)
+        {
+            LastExpiryMode = expiryMode;
+            LastExpectedValue = expectedValue;
+            if (WriteConflict) return false;
+            await SetStringAsync(database, key, value, cancellationToken);
+            return true;
+        }
+
+        public Task<bool> EditElementAsync(int database, string key, string type, string action, string selector, string value, string? expectedValue, double score, CancellationToken cancellationToken = default)
+        {
+            ElementCalled = true;
+            return Task.FromResult(!WriteConflict);
+        }
+
         public Exception? DeleteException { get; set; }
 
         public Exception? PreviewException { get; set; }
+        public Exception? PageException { get; set; }
 
         public KeyValuePreviewModel? Preview { get; set; } = new()
         {
@@ -501,6 +522,7 @@ public class MiddlewareTests
 
         public Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
         {
+            if (PageException != null) throw PageException;
             LastKeyPageCursor = cursor;
             LastKeyPageOffset = pageOffset;
             LastKeyPageSize = pageSize;

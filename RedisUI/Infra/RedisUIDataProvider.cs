@@ -7,9 +7,10 @@ using StackExchange.Redis;
 
 namespace RedisUI.Infra
 {
-    public sealed class RedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider
+    public sealed class RedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider, IRedisUIEditorProvider
     {
         private readonly RedisUISettings _settings;
+        private readonly RedisKeyPager _keyPager;
         private readonly Lazy<IConnectionMultiplexer>? _ownedConnection;
         private readonly IConnectionMultiplexer? _externalConnection;
         private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -17,6 +18,7 @@ namespace RedisUI.Infra
         public RedisUIDataProvider(RedisUISettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _keyPager = new RedisKeyPager(settings);
 
             if (_settings.ConnectionMultiplexer != null)
             {
@@ -40,96 +42,27 @@ namespace RedisUI.Infra
             return await GetKeysAsync(database, cursor, pageSize, 0, searchPattern, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
+        public Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
         {
             var redisDb = GetDatabase(database);
-            var keys = new List<KeyModel>(pageSize);
-            var scanCursor = cursor;
-            var scanOffset = Math.Max(0, pageOffset);
-            var scanIterations = 0;
-            var maxScanIterations = Math.Max(1, _settings.MaxScanIterationsPerPage);
-
-            while (keys.Count < pageSize && scanIterations < maxScanIterations)
-            {
-                scanIterations++;
-                RedisResult result;
-
-                if (string.IsNullOrWhiteSpace(searchPattern))
+            return _keyPager.ReadAsync(database, cursor, pageSize, pageOffset, searchPattern,
+                async (scanCursor, count) =>
                 {
-                    result = await redisDb.ExecuteAsync("SCAN", scanCursor.ToString(CultureInfo.InvariantCulture), "COUNT", pageSize.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
-                }
-                else
-                {
-                    result = await redisDb.ExecuteAsync("SCAN", scanCursor.ToString(CultureInfo.InvariantCulture), "MATCH", searchPattern, "COUNT", pageSize.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
-                }
-
-                var innerResult = TryGetResultArray(result);
-                if (innerResult.Length < 2)
-                {
-                    return new KeyPageModel();
-                }
-
-                var keyNames = TryGetResultArray(innerResult[1])
-                    .Select(x => x.ToString() ?? string.Empty)
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .ToList();
-                var effectiveOffset = Math.Min(scanOffset, keyNames.Count);
-                var availableKeyNames = keyNames.Skip(effectiveOffset).ToList();
-                var remainingPageSize = pageSize - keys.Count;
-                var selectedKeyNames = availableKeyNames.Take(remainingPageSize).ToList();
-
-                foreach (var keyName in selectedKeyNames)
-                {
-                    keys.Add(await BuildKeyMetadataAsync(redisDb, keyName).ConfigureAwait(false));
-                }
-
-                if (availableKeyNames.Count > selectedKeyNames.Count)
-                {
-                    return new KeyPageModel
+                    var arguments = new List<object> { scanCursor.ToString(CultureInfo.InvariantCulture), "COUNT", count };
+                    if (!string.IsNullOrWhiteSpace(searchPattern))
                     {
-                        Keys = keys,
-                        NextCursor = scanCursor,
-                        NextPageOffset = effectiveOffset + selectedKeyNames.Count
-                    };
-                }
-
-                if (!long.TryParse(innerResult[0].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCursor))
-                {
-                    nextCursor = 0;
-                }
-
-                if (keys.Count >= pageSize)
-                {
-                    return new KeyPageModel
-                    {
-                        Keys = keys,
-                        NextCursor = nextCursor,
-                        NextPageOffset = 0
-                    };
-                }
-
-                if (nextCursor == 0)
-                {
-                    return new KeyPageModel
-                    {
-                        Keys = keys,
-                        NextCursor = 0,
-                        NextPageOffset = 0
-                    };
-                }
-
-                scanCursor = nextCursor;
-                scanOffset = 0;
-            }
-
-            return new KeyPageModel
-            {
-                Keys = keys,
-                NextCursor = scanCursor,
-                NextPageOffset = scanOffset
-            };
+                        arguments.Add("MATCH");
+                        arguments.Add(searchPattern);
+                    }
+                    var result = await redisDb.ExecuteAsync("SCAN", arguments.ToArray()).ConfigureAwait(false);
+                    var innerResult = TryGetResultArray(result);
+                    if (innerResult.Length != 2 ||
+                        !long.TryParse(innerResult[0].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCursor))
+                        throw new InvalidOperationException("Redis returned an invalid SCAN response.");
+                    var names = TryGetResultArray(innerResult[1]).Select(x => x.ToString() ?? string.Empty).ToArray();
+                    return new RedisKeyPager.ScanBatch(nextCursor, names);
+                }, key => BuildKeyMetadataAsync(redisDb, key), cancellationToken);
         }
-
         public async Task<KeyValuePreviewModel?> GetKeyPreviewAsync(
             int database,
             string key,
@@ -164,19 +97,19 @@ namespace RedisUI.Infra
         public async Task<StatisticsVm> GetStatisticsAsync(CancellationToken cancellationToken = default)
         {
             var redisDb = GetDatabase(0);
-            var keyspaces = await GetKeyspacesAsync(cancellationToken).ConfigureAwait(false);
-            var serverInfo = await redisDb.ExecuteAsync("INFO", "SERVER").ConfigureAwait(false);
-            var memoryInfo = await redisDb.ExecuteAsync("INFO", "MEMORY").ConfigureAwait(false);
-            var statsInfo = await redisDb.ExecuteAsync("INFO", "STATS").ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             var allInfo = await redisDb.ExecuteAsync("INFO").ConfigureAwait(false);
+            var infoText = allInfo.ToString();
+            var info = infoText.ToInfo();
 
             return new StatisticsVm
             {
-                Keyspaces = keyspaces.ToList(),
-                Server = ServerModel.Instance(serverInfo.ToString()),
-                Memory = MemoryModel.Instance(memoryInfo.ToString()),
-                Stats = StatsModel.Instance(statsInfo.ToString()),
-                AllInfo = allInfo.ToString().ToInfo()
+                Keyspaces = info.Where(x => x.Key.StartsWith("db", StringComparison.Ordinal) && int.TryParse(x.Key[2..], out _))
+                    .Select(x => KeyspaceModel.Instance(x.Key + ":" + x.Value)).ToList(),
+                Server = ServerModel.Instance(infoText),
+                Memory = MemoryModel.Instance(infoText),
+                Stats = StatsModel.Instance(infoText),
+                AllInfo = info
             };
         }
 
@@ -204,7 +137,78 @@ namespace RedisUI.Infra
         public async Task SetStringAsync(int database, string key, string value, CancellationToken cancellationToken = default)
         {
             var redisDb = GetDatabase(database);
-            await redisDb.ExecuteAsync("SET", key, value).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            await redisDb.ExecuteAsync("SET", key, value, "KEEPTTL").ConfigureAwait(false);
+        }
+
+        public async Task<bool> WriteStringAsync(int database, string key, string value, string expiryMode,
+            long? ttlSeconds, string? expectedValue, CancellationToken cancellationToken = default)
+        {
+            if (expiryMode is not ("keep" or "set" or "persist") ||
+                (expiryMode == "set" && (!ttlSeconds.HasValue || ttlSeconds <= 0)))
+                throw new ArgumentException("Invalid expiry policy.");
+            cancellationToken.ThrowIfCancellationRequested();
+            // Compare and write together so another editor cannot be silently overwritten.
+            const string script = """
+                if ARGV[4] == '1' and redis.call('GET', KEYS[1]) ~= ARGV[5] then return 0 end
+                if ARGV[2] == 'set' then redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+                elseif ARGV[2] == 'keep' then redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL')
+                else redis.call('SET', KEYS[1], ARGV[1]) end
+                return 1
+                """;
+            var result = await GetDatabase(database).ScriptEvaluateAsync(script, new RedisKey[] { key },
+                new RedisValue[] { value, expiryMode, ttlSeconds ?? 0, expectedValue == null ? "0" : "1", expectedValue ?? "" }).ConfigureAwait(false);
+            return (long)result == 1;
+        }
+
+        public async Task<bool> EditElementAsync(int database, string key, string type, string action,
+            string selector, string value, string? expectedValue, double score, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action is not ("update" or "delete")) throw new ArgumentException("Invalid element action.");
+            var db = GetDatabase(database);
+            var delete = action == "delete";
+            switch (type)
+            {
+                case "hash":
+                    if (delete) return await db.HashDeleteAsync(key, selector).ConfigureAwait(false);
+                    await db.HashSetAsync(key, selector, value).ConfigureAwait(false);
+                    return true;
+                case "set":
+                    return (long)await db.ScriptEvaluateAsync("""
+                        if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 0 then return 0 end
+                        if ARGV[3] == 'update' then
+                            redis.call('SADD', KEYS[1], ARGV[2])
+                            if ARGV[1] ~= ARGV[2] then redis.call('SREM', KEYS[1], ARGV[1]) end
+                        else redis.call('SREM', KEYS[1], ARGV[1]) end
+                        return 1
+                        """, new RedisKey[] { key }, new RedisValue[] { selector, value, action }).ConfigureAwait(false) == 1;
+                case "sortedset":
+                    if (!double.IsFinite(score)) throw new ArgumentException("Invalid score.");
+                    return (long)await db.ScriptEvaluateAsync("""
+                        if not redis.call('ZSCORE', KEYS[1], ARGV[1]) then return 0 end
+                        if ARGV[4] == 'update' then
+                            redis.call('ZADD', KEYS[1], ARGV[3], ARGV[2])
+                            if ARGV[1] ~= ARGV[2] then redis.call('ZREM', KEYS[1], ARGV[1]) end
+                        else redis.call('ZREM', KEYS[1], ARGV[1]) end
+                        return 1
+                        """, new RedisKey[] { key }, new RedisValue[] { selector, value, score, action }).ConfigureAwait(false) == 1;
+                case "list":
+                    if (!long.TryParse(selector, out var index) || index < 0 || expectedValue == null)
+                        throw new ArgumentException("List edits require an index and expected value.");
+                    return (long)await db.ScriptEvaluateAsync("""
+                        if redis.call('LINDEX', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+                        if ARGV[4] == 'delete' then
+                            if redis.call('LPOS', KEYS[1], ARGV[5]) then return 0 end
+                            redis.call('LSET', KEYS[1], ARGV[1], ARGV[5])
+                            redis.call('LREM', KEYS[1], 1, ARGV[5])
+                        else redis.call('LSET', KEYS[1], ARGV[1], ARGV[3]) end
+                        return 1
+                        """, new RedisKey[] { key }, new RedisValue[] { index, expectedValue, value, action, Guid.NewGuid().ToString("N") }).ConfigureAwait(false) == 1;
+                case "stream" when delete:
+                    return await db.StreamDeleteAsync(key, new RedisValue[] { selector }).ConfigureAwait(false) > 0;
+                default: throw new ArgumentException("Unsupported element operation.");
+            }
         }
 
         public async Task ListPushAsync(int database, string key, string element, CancellationToken cancellationToken = default)
@@ -246,6 +250,7 @@ namespace RedisUI.Infra
 
         public void Dispose()
         {
+            _keyPager.Dispose();
             if (_ownedConnection != null && _ownedConnection.IsValueCreated)
             {
                 _ownedConnection.Value.Dispose();

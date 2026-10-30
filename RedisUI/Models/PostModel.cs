@@ -16,8 +16,18 @@ namespace RedisUI.Models
         /// <summary>SortedSet score as a string.</summary>
         public string InsertScore { get; set; } = string.Empty;
 
-        /// <summary>Optional TTL in seconds applied after insert. Null or 0 = no expiry.</summary>
+        /// <summary>Positive TTL in seconds. Omit to preserve the existing TTL.</summary>
         public long? InsertTTLSeconds { get; set; }
+
+        public string ExpiryMode { get; set; } = "keep";
+        public string? ExpectedValue { get; set; }
+        public bool ValidateJson { get; set; }
+        public string ElementKey { get; set; } = string.Empty;
+        public string ElementType { get; set; } = string.Empty;
+        public string ElementAction { get; set; } = string.Empty;
+        public string ElementSelector { get; set; } = string.Empty;
+        public string ElementValue { get; set; } = string.Empty;
+        public double ElementScore { get; set; }
 
         /// <summary>Key on which to set or remove expiry.</summary>
         public string SetExpiryKey { get; set; } = string.Empty;
