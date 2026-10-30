@@ -54,6 +54,8 @@ The built-in provider requires Redis **6.0.6 or newer** for all editing features
 
 Key scans have a configurable iteration budget and metadata concurrency. The **Expiring keys on this page** checkbox filters only already-loaded keys; it does not scan the entire database. Key groups have the same page scope. Redis scans are not snapshots and can repeat keys while data changes.
 
+SCAN may return more keys than the requested page size. RedisUI buffers the remaining key names instead of repeating the same SCAN cursor and skipping into a potentially different result. `NextPageOffset` is an opaque continuation ID: pass it back unchanged with `NextCursor`. Continuations are held for up to five minutes in a bounded 16 MiB buffer per provider. Expired or evicted continuations return HTTP 410 from `/keys`; the UI restarts the search with the same filters. Refreshing an expired HTML page also restarts scanning. Continuations are local to the application instance, so multi-instance deployments should use session affinity for paging.
+
 To integrate the Redis UI into your application, follow these steps:
 
 - Install [RedisUI](https://www.nuget.org/packages/RedisUI/) from the NuGet Gallery.

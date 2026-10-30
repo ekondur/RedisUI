@@ -21,6 +21,7 @@ const { chromium } = require('playwright');
         let hash = 'before';
         let metricsCount = 0;
         let rejectNextWrite = false;
+        let expireNextPage = false;
         await context.route('**/*', async route => {
             const request = route.request();
             const url = new URL(request.url());
@@ -44,6 +45,10 @@ const { chromium } = require('playwright');
             let result;
             switch (url.pathname) {
                 case '/redis/keys': {
+                    if (expireNextPage && url.searchParams.get('offset') === '123') {
+                        expireNextPage = false;
+                        return route.fulfill({ status: 410, body: 'This key page has expired.' });
+                    }
                     let keys = Object.keys(values).map(name => ({ name, keyType: 'String', valueSizeBytes: values[name].length, ttlSeconds: name === 'users:1' ? 60 : null }));
                     keys.push({ name: 'users:hash', keyType: 'Hash', valueSizeBytes: 50, ttlSeconds: null });
                     if (url.searchParams.get('key') === 'users:*') keys = keys.filter(x => x.name.startsWith('users:'));
@@ -119,6 +124,14 @@ const { chromium } = require('playwright');
         await page.getByRole('button', { name: 'Search users:*', exact: true }).click();
         await page.locator('#auditPanel summary').click();
         await page.waitForFunction(() => document.getElementById('auditRows').textContent.includes('tester'));
+        expireNextPage = true;
+        await page.goto('http://redisui.test/redis?page=42&offset=123&key=users%3A*');
+        await page.locator('#refreshKeys').click();
+        await page.waitForFunction(() => document.getElementById('notice').textContent.includes('Search restarted'));
+        assert.equal(new URL(page.url()).searchParams.get('page'), '0');
+        assert.equal(new URL(page.url()).searchParams.get('offset'), '0');
+        assert.equal(new URL(page.url()).searchParams.get('key'), 'users:*');
+        assert.equal(await page.locator('#previousKeys').isDisabled(), true);
         await page.screenshot({ path: path.resolve('browser-desktop.png'), fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Mobile layout must fit viewport');
