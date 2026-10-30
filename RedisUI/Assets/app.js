@@ -20,7 +20,11 @@
     };
     async function request(path, overrides, options) {
         const response = await fetch(url(path, overrides), options);
-        if (!response.ok) throw new Error((await response.text()) || 'Request failed. Please try again.');
+        if (!response.ok) {
+            const error = new Error((await response.text()) || 'Request failed. Please try again.');
+            error.status = response.status;
+            throw error;
+        }
         return response.status === 204 ? null : response.json();
     }
     $('keysLink').href = url();
@@ -148,7 +152,16 @@
                 if (result.databaseSize != null) $('databaseSize').textContent = result.databaseSize;
                 history.replaceState(null, '', url('', page));
                 renderKeys(); return true;
-            } catch (error) { if (id === listRequest) { notify(error.message, true); $('pageStatus').textContent = 'Could not load keys'; } return false; }
+            } catch (error) {
+                if (id === listRequest) {
+                    if (error.status === 410 && Number(next.offset) > 0) {
+                        pageHistory = []; clearPreview();
+                        if (await loadKeys({ ...next, page: '0', offset: 0 }))
+                            notify('The previous key page expired. Search restarted from the first page.');
+                    } else { notify(error.message, true); $('pageStatus').textContent = 'Could not load keys'; }
+                }
+                return false;
+            }
         }
         async function refresh() {
             if (await loadKeys() && selected) await loadPreview();

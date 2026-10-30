@@ -172,6 +172,16 @@ namespace RedisUI
                 }
                 await WriteHtmlAsync(context, Layout.Build(layout, _settings));
             }
+            catch (RedisUIPageExpiredException ex)
+            {
+                if (subPath.Length == 0)
+                {
+                    // Refreshing a bookmarked/expired HTML page starts a new scan with the same filters.
+                    var query = QueryString.Create(context.Request.Query.Where(item => item.Key is not ("page" or "offset")));
+                    context.Response.Redirect((_basePath.Value ?? "/redis") + query);
+                }
+                else await WritePlainTextAsync(context, StatusCodes.Status410Gone, ex.Message);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning("RedisUI request failed on {Connection} ({ExceptionType}).", connection, ex.GetType().Name);

@@ -466,6 +466,7 @@ public partial class MiddlewareTests
         public Exception? DeleteException { get; set; }
 
         public Exception? PreviewException { get; set; }
+        public Exception? PageException { get; set; }
 
         public KeyValuePreviewModel? Preview { get; set; } = new()
         {
@@ -521,6 +522,7 @@ public partial class MiddlewareTests
 
         public Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
         {
+            if (PageException != null) throw PageException;
             LastKeyPageCursor = cursor;
             LastKeyPageOffset = pageOffset;
             LastKeyPageSize = pageSize;

@@ -10,6 +10,7 @@ namespace RedisUI.Infra
     public sealed class RedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider, IRedisUIEditorProvider
     {
         private readonly RedisUISettings _settings;
+        private readonly RedisKeyPager _keyPager;
         private readonly Lazy<IConnectionMultiplexer>? _ownedConnection;
         private readonly IConnectionMultiplexer? _externalConnection;
         private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -17,6 +18,7 @@ namespace RedisUI.Infra
         public RedisUIDataProvider(RedisUISettings settings)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            _keyPager = new RedisKeyPager(settings);
 
             if (_settings.ConnectionMultiplexer != null)
             {
@@ -40,99 +42,27 @@ namespace RedisUI.Infra
             return await GetKeysAsync(database, cursor, pageSize, 0, searchPattern, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
+        public Task<KeyPageModel> GetKeysAsync(int database, long cursor, int pageSize, int pageOffset, string? searchPattern, CancellationToken cancellationToken = default)
         {
             var redisDb = GetDatabase(database);
-            var keys = new List<KeyModel>(pageSize);
-            var scanCursor = cursor;
-            var scanOffset = Math.Max(0, pageOffset);
-            var scanIterations = 0;
-            var maxScanIterations = Math.Max(1, _settings.MaxScanIterationsPerPage);
-
-            while (keys.Count < pageSize && scanIterations < maxScanIterations)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                scanIterations++;
-                RedisResult result;
-
-                if (string.IsNullOrWhiteSpace(searchPattern))
+            return _keyPager.ReadAsync(database, cursor, pageSize, pageOffset, searchPattern,
+                async (scanCursor, count) =>
                 {
-                    result = await redisDb.ExecuteAsync("SCAN", scanCursor.ToString(CultureInfo.InvariantCulture), "COUNT", pageSize.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
-                }
-                else
-                {
-                    result = await redisDb.ExecuteAsync("SCAN", scanCursor.ToString(CultureInfo.InvariantCulture), "MATCH", searchPattern, "COUNT", pageSize.ToString(CultureInfo.InvariantCulture)).ConfigureAwait(false);
-                }
-
-                var innerResult = TryGetResultArray(result);
-                if (innerResult.Length < 2)
-                {
-                    return new KeyPageModel();
-                }
-
-                var keyNames = TryGetResultArray(innerResult[1])
-                    .Select(x => x.ToString() ?? string.Empty)
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .ToList();
-                var effectiveOffset = Math.Min(scanOffset, keyNames.Count);
-                var availableKeyNames = keyNames.Skip(effectiveOffset).ToList();
-                var remainingPageSize = pageSize - keys.Count;
-                var selectedKeyNames = availableKeyNames.Take(remainingPageSize).ToList();
-
-                foreach (var batch in selectedKeyNames.Chunk(Math.Clamp(_settings.MetadataConcurrency, 1, 64)))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var metadata = await Task.WhenAll(batch.Select(keyName => BuildKeyMetadataAsync(redisDb, keyName))).ConfigureAwait(false);
-                    keys.AddRange(metadata.Where(key => key.KeyType != nameof(RedisType.None)));
-                }
-
-                if (availableKeyNames.Count > selectedKeyNames.Count)
-                {
-                    return new KeyPageModel
+                    var arguments = new List<object> { scanCursor.ToString(CultureInfo.InvariantCulture), "COUNT", count };
+                    if (!string.IsNullOrWhiteSpace(searchPattern))
                     {
-                        Keys = keys,
-                        NextCursor = scanCursor,
-                        NextPageOffset = effectiveOffset + selectedKeyNames.Count
-                    };
-                }
-
-                if (!long.TryParse(innerResult[0].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCursor))
-                {
-                    nextCursor = 0;
-                }
-
-                if (keys.Count >= pageSize)
-                {
-                    return new KeyPageModel
-                    {
-                        Keys = keys,
-                        NextCursor = nextCursor,
-                        NextPageOffset = 0
-                    };
-                }
-
-                if (nextCursor == 0)
-                {
-                    return new KeyPageModel
-                    {
-                        Keys = keys,
-                        NextCursor = 0,
-                        NextPageOffset = 0
-                    };
-                }
-
-                scanCursor = nextCursor;
-                scanOffset = 0;
-            }
-
-            return new KeyPageModel
-            {
-                Keys = keys,
-                NextCursor = scanCursor,
-                NextPageOffset = scanOffset
-            };
+                        arguments.Add("MATCH");
+                        arguments.Add(searchPattern);
+                    }
+                    var result = await redisDb.ExecuteAsync("SCAN", arguments.ToArray()).ConfigureAwait(false);
+                    var innerResult = TryGetResultArray(result);
+                    if (innerResult.Length != 2 ||
+                        !long.TryParse(innerResult[0].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var nextCursor))
+                        throw new InvalidOperationException("Redis returned an invalid SCAN response.");
+                    var names = TryGetResultArray(innerResult[1]).Select(x => x.ToString() ?? string.Empty).ToArray();
+                    return new RedisKeyPager.ScanBatch(nextCursor, names);
+                }, key => BuildKeyMetadataAsync(redisDb, key), cancellationToken);
         }
-
         public async Task<KeyValuePreviewModel?> GetKeyPreviewAsync(
             int database,
             string key,
@@ -320,6 +250,7 @@ namespace RedisUI.Infra
 
         public void Dispose()
         {
+            _keyPager.Dispose();
             if (_ownedConnection != null && _ownedConnection.IsValueCreated)
             {
                 _ownedConnection.Value.Dispose();

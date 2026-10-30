@@ -8,6 +8,24 @@ namespace RedisUI.Tests;
 
 public partial class MiddlewareTests
 {
+    [Fact]
+    public async Task ExpiredContinuation_Returns410ForApi_AndRestartsHtmlScanWithSameFilters()
+    {
+        using var middleware = CreateMiddleware(_ => Task.CompletedTask, new RedisUISettings
+        { DataProvider = new FakeRedisUIDataProvider { PageException = new RedisUI.Infra.RedisUIPageExpiredException() } });
+        var api = CreateContext("/redis/keys?db=2&key=users%3A*&page=42&offset=123");
+        await middleware.InvokeAsync(api);
+        Assert.Equal(410, api.Response.StatusCode);
+        var html = CreateContext("/redis?db=2&key=users%3A*&page=42&offset=123");
+        await middleware.InvokeAsync(html);
+        Assert.Equal(302, html.Response.StatusCode);
+        var location = html.Response.Headers.Location.ToString();
+        Assert.Contains("db=2", location);
+        Assert.Contains("key=users", location);
+        Assert.DoesNotContain("page=", location);
+        Assert.DoesNotContain("offset=", location);
+    }
+
     private static DefaultHttpContext Mutation(string body, string query = "")
     {
         var context = CreateContext("/redis" + query, "POST");
