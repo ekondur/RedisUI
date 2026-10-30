@@ -8,6 +8,11 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
 
     steps:
       - name: Checkout
@@ -29,6 +34,11 @@ jobs:
 
       - name: Pack
         run: dotnet pack -c Release --no-build -o ./artifacts /p:Version=${GITHUB_REF_NAME#v}
+
+      - name: Test before publishing
+        run: dotnet test RedisUI.Tests/RedisUI.Tests.csproj -c Release --no-build
+        env:
+          REDISUI_TEST_REDIS: localhost:6379
 
       - name: Push to NuGet.org
         run: |

@@ -25,6 +25,7 @@ namespace RedisUI.Pages
             }
 
             return $@"
+<section id=""liveMetrics""><h2>Live server statistics</h2><label><input type=""checkbox"" id=""metricsPause""> Pause updates</label><p id=""metricsStatus"" class=""muted"">Waiting for first sample…</p><p class=""muted"">Metrics apply to this Redis server, across databases. Hit rate and evictions use changes between samples; no traffic is shown as —. Static details below reflect page load.</p></section>
 <div class=""row"">
     <div class=""col-4"">
         <div class=""card border-info mb-3 sticky-top"">

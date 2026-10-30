@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.Http;
 using RedisUI.Infra;
 using RedisUI.Models;
 using RedisUI.Pages;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Collections.Concurrent;
 
 namespace RedisUI
 {
@@ -18,28 +21,41 @@ namespace RedisUI
         private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
         private readonly RequestDelegate _next;
         private readonly RedisUISettings _settings;
-        private readonly IRedisUIDataProvider _dataProvider;
-        private readonly bool _ownsDataProvider;
         private readonly PathString _basePath;
+        private readonly Dictionary<string, (IRedisUIDataProvider Provider, bool Owned, bool ReadOnly, string Environment)> _connections = new(StringComparer.Ordinal);
+        private readonly ConcurrentQueue<RedisUIAuditEntry> _audit = new();
+        private readonly ILogger<RedisUIMiddleware> _logger;
 
-        public RedisUIMiddleware(RequestDelegate next, RedisUISettings settings)
+        public RedisUIMiddleware(RequestDelegate next, RedisUISettings settings, ILogger<RedisUIMiddleware>? logger = null)
         {
             _next = next;
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-            _basePath = new PathString(NormalizePath(_settings.Path));
-            _settings.Path = _basePath.Value ?? "/redis";
-
-            if (_settings.DataProvider != null)
+            _logger = logger ?? NullLogger<RedisUIMiddleware>.Instance;
+            _basePath = new PathString(NormalizePath(settings.Path));
+            settings.Path = _basePath.Value ?? "/redis";
+            AddConnection("default", settings, settings.ReadOnly, settings.Environment);
+            foreach (var profile in settings.Connections)
             {
-                _dataProvider = _settings.DataProvider;
-                _ownsDataProvider = false;
-            }
-            else
-            {
-                _dataProvider = new RedisUIDataProvider(_settings);
-                _ownsDataProvider = true;
+                if (string.IsNullOrWhiteSpace(profile.Name) || _connections.ContainsKey(profile.Name))
+                    throw new ArgumentException("Connection names must be unique and nonempty; 'default' is reserved.");
+                var profileSettings = new RedisUISettings
+                {
+                    ConnectionString = profile.ConnectionString, ConfigurationOptions = profile.ConfigurationOptions,
+                    ConnectionMultiplexer = profile.ConnectionMultiplexer, DataProvider = profile.DataProvider,
+                    MaxScanIterationsPerPage = settings.MaxScanIterationsPerPage, MetadataConcurrency = settings.MetadataConcurrency,
+                    ValuePreviewPageSize = settings.ValuePreviewPageSize, MaxValuePreviewPageSize = settings.MaxValuePreviewPageSize,
+                    StringPreviewBytes = settings.StringPreviewBytes, MaxStringPreviewBytes = settings.MaxStringPreviewBytes
+                };
+                AddConnection(profile.Name, profileSettings, settings.ReadOnly || profile.ReadOnly, profile.Environment);
             }
         }
+
+        private void AddConnection(string name, RedisUISettings settings, bool readOnly, string environment) =>
+            _connections.Add(name, (settings.DataProvider ?? new RedisUIDataProvider(settings), settings.DataProvider == null, readOnly, environment));
+
+        private bool Allowed(HttpContext context, string connection, int database, RedisUIOperation operation) =>
+            (!_connections[connection].ReadOnly || operation is RedisUIOperation.View or RedisUIOperation.Audit) &&
+            (_settings.AuthorizeOperation?.Invoke(context, new RedisUIAccess(connection, database, operation)) ?? true);
 
         public async Task InvokeAsync(HttpContext context)
         {
@@ -48,119 +64,129 @@ namespace RedisUI
                 await _next(context);
                 return;
             }
-
-            var subPath = remainingPath.Value?.TrimEnd('/') ?? string.Empty;
-            if (subPath.Length > 0 &&
-                !string.Equals(subPath, "/statistics", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(subPath, "/value", StringComparison.OrdinalIgnoreCase))
+            context.Response.Headers.CacheControl = "no-store";
+            var subPath = (remainingPath.Value?.TrimEnd('/') ?? string.Empty).ToLowerInvariant();
+            if (subPath is not ("" or "/statistics" or "/value" or "/keys" or "/metrics" or "/audit"))
             {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                context.Response.StatusCode = 404;
                 return;
             }
-
             if (_settings.AuthorizationFilter != null && !_settings.AuthorizationFilter.Authorize(context))
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.StatusCode = 403;
                 return;
             }
-
-            if (!HttpMethods.IsGet(context.Request.Method) &&
-                !HttpMethods.IsHead(context.Request.Method) &&
-                !HttpMethods.IsPost(context.Request.Method))
+            if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method) &&
+                !(HttpMethods.IsPost(context.Request.Method) && subPath == ""))
             {
-                context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
-                context.Response.Headers.Allow = "GET, HEAD, POST";
+                context.Response.StatusCode = 405;
+                context.Response.Headers.Allow = subPath == "" ? "GET, HEAD, POST" : "GET, HEAD";
                 return;
             }
-
             if (!TryParseInt(context.Request.Query["db"].ToString(), 0, out var currentDb))
             {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'db' query parameter.");
+                await WritePlainTextAsync(context, 400, "Invalid 'db' query parameter.");
                 return;
             }
-
-            if (string.Equals(subPath, "/value", StringComparison.OrdinalIgnoreCase))
+            var connection = context.Request.Query["connection"].ToString();
+            if (connection.Length == 0) connection = "default";
+            if (!_connections.TryGetValue(connection, out var selected))
             {
-                await TryHandleValuePreviewAsync(context, currentDb).ConfigureAwait(false);
+                await WritePlainTextAsync(context, 400, "Unknown connection.");
                 return;
             }
-
-            if (!TryParseLong(context.Request.Query["page"].ToString(), 0, out var cursor))
+            if (!Allowed(context, connection, currentDb, RedisUIOperation.View))
             {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'page' query parameter.");
+                context.Response.StatusCode = 403;
                 return;
             }
-
-            if (!TryParseInt(context.Request.Query["offset"].ToString(), 0, out var pageOffset))
+            var provider = selected.Provider;
+            try
             {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'offset' query parameter.");
-                return;
-            }
-
-            if (!TryParsePageSize(context.Request.Query["size"].ToString(), out var pageSize))
-            {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid 'size' query parameter.");
-                return;
-            }
-
-            if (HttpMethods.IsPost(context.Request.Method))
-            {
-                if (!IsJsonRequest(context.Request.ContentType))
+                if (subPath == "/value")
                 {
-                    await WritePlainTextAsync(context, StatusCodes.Status415UnsupportedMediaType, "RedisUI mutations require 'application/json'.");
+                    await TryHandleValuePreviewAsync(context, currentDb, provider);
                     return;
                 }
-
-                if (!ValidateAntiForgeryToken(context))
+                if (subPath == "/audit")
                 {
-                    await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Invalid CSRF token.");
+                    if (!Allowed(context, connection, currentDb, RedisUIOperation.Audit)) { context.Response.StatusCode = 403; return; }
+                    await WriteJsonAsync(context, _audit.ToArray().Reverse().Where(x => x.Connection == connection && x.Database == currentDb));
                     return;
                 }
-
-                if (!await TryHandleMutationAsync(context, currentDb).ConfigureAwait(false))
+                if (subPath == "/metrics")
                 {
+                    var stats = await provider.GetStatisticsAsync(context.RequestAborted);
+                    double? Number(string key) => stats.AllInfo.TryGetValue(key, out var value) &&
+                        double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number) && double.IsFinite(number) ? number : null;
+                    var hits = Number("keyspace_hits");
+                    var misses = Number("keyspace_misses");
+                    await WriteJsonAsync(context, new { timestamp = DateTimeOffset.UtcNow, memoryBytes = Number("used_memory"),
+                        operationsPerSecond = Number("instantaneous_ops_per_sec"), hits, misses, evictedKeys = Number("evicted_keys") });
                     return;
                 }
-
-                context.Response.StatusCode = StatusCodes.Status204NoContent;
-                return;
+                if (!TryParseLong(context.Request.Query["page"].ToString(), 0, out var cursor))
+                { await WritePlainTextAsync(context, 400, "Invalid 'page' query parameter."); return; }
+                if (!TryParseInt(context.Request.Query["offset"].ToString(), 0, out var pageOffset))
+                { await WritePlainTextAsync(context, 400, "Invalid 'offset' query parameter."); return; }
+                if (!TryParsePageSize(context.Request.Query["size"].ToString(), out var pageSize))
+                { await WritePlainTextAsync(context, 400, "Invalid 'size' query parameter."); return; }
+                if (HttpMethods.IsPost(context.Request.Method))
+                {
+                    if (!IsJsonRequest(context.Request.ContentType))
+                    { await WritePlainTextAsync(context, 415, "RedisUI mutations require 'application/json'."); return; }
+                    if (!ValidateAntiForgeryToken(context))
+                    { await WritePlainTextAsync(context, 400, "Invalid CSRF token."); return; }
+                    if (await TryHandleMutationAsync(context, currentDb, connection, provider)) context.Response.StatusCode = 204;
+                    return;
+                }
+                if (subPath == "/keys")
+                {
+                    var page = await GetPageAsync(provider, currentDb, cursor, pageSize, pageOffset, context.Request.Query["key"].ToString(), context.RequestAborted);
+                    await WriteJsonAsync(context, new { keys = page.Keys.Take(pageSize).Select(key => new { key.Name, key.KeyType, key.ValueSizeBytes, key.TTLSeconds }),
+                        nextCursor = page.NextCursor.ToString(System.Globalization.CultureInfo.InvariantCulture), page.NextPageOffset,
+                        databaseSize = await provider.GetDatabaseSizeAsync(currentDb, context.RequestAborted) });
+                    return;
+                }
+                var keyspaces = await provider.GetKeyspacesAsync(context.RequestAborted);
+                var layout = new LayoutModel
+                {
+                    DbList = keyspaces.Select(x => x.Db).Append("db0").Distinct().ToList(), CurrentDb = currentDb,
+                    DbSize = await provider.GetDatabaseSizeAsync(currentDb, context.RequestAborted),
+                    AntiForgeryToken = EnsureAntiForgeryToken(context), Connection = connection, Environment = selected.Environment,
+                    CanEdit = Allowed(context, connection, currentDb, RedisUIOperation.Edit),
+                    CanDelete = Allowed(context, connection, currentDb, RedisUIOperation.Delete),
+                    CanAudit = Allowed(context, connection, currentDb, RedisUIOperation.Audit),
+                    CanEditElements = provider is IRedisUIEditorProvider
+                };
+                if (subPath == "/statistics")
+                {
+                    var statistics = await provider.GetStatisticsAsync(context.RequestAborted);
+                    statistics.Keyspaces = keyspaces.ToList();
+                    layout.Section = Statistics.Build(statistics);
+                }
+                else
+                {
+                    var page = await GetPageAsync(provider, currentDb, cursor, pageSize, pageOffset, context.Request.Query["key"].ToString(), context.RequestAborted);
+                    layout.Section = Main.Build(page.Keys.Take(pageSize).ToList(), page.NextCursor, page.NextPageOffset, _settings);
+                }
+                await WriteHtmlAsync(context, Layout.Build(layout, _settings));
             }
-
-            var antiForgeryToken = EnsureAntiForgeryToken(context);
-            var keyspaces = await _dataProvider.GetKeyspacesAsync(context.RequestAborted).ConfigureAwait(false);
-            var layoutModel = new LayoutModel
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                DbList = new System.Collections.Generic.List<string>(System.Linq.Enumerable.Select(keyspaces, x => x.Db)),
-                CurrentDb = currentDb,
-                DbSize = await _dataProvider.GetDatabaseSizeAsync(currentDb, context.RequestAborted).ConfigureAwait(false),
-                AntiForgeryToken = antiForgeryToken
-            };
-
-            if (string.Equals(subPath, "/statistics", StringComparison.OrdinalIgnoreCase))
-            {
-                var statistics = await _dataProvider.GetStatisticsAsync(context.RequestAborted).ConfigureAwait(false);
-                statistics.Keyspaces = new System.Collections.Generic.List<KeyspaceModel>(keyspaces);
-                layoutModel.Section = Statistics.Build(statistics);
-                await WriteHtmlAsync(context, Layout.Build(layoutModel, _settings)).ConfigureAwait(false);
-                return;
+                _logger.LogWarning("RedisUI request failed on {Connection} ({ExceptionType}).", connection, ex.GetType().Name);
+                await WritePlainTextAsync(context, 500, RequestFailedMessage);
             }
-
-            var searchKey = context.Request.Query["key"].ToString();
-            var keyPage = _dataProvider is IRedisUIKeyPageProvider keyPageProvider
-                ? await keyPageProvider.GetKeysAsync(currentDb, cursor, pageSize, pageOffset, searchKey, context.RequestAborted).ConfigureAwait(false)
-                : await _dataProvider.GetKeysAsync(currentDb, cursor, pageSize, searchKey, context.RequestAborted).ConfigureAwait(false);
-            var visibleKeys = keyPage.Keys.Take(pageSize).ToList();
-
-            layoutModel.Section = Main.Build(visibleKeys, keyPage.NextCursor, keyPage.NextPageOffset, _settings);
-            await WriteHtmlAsync(context, Layout.Build(layoutModel, _settings)).ConfigureAwait(false);
         }
+
+        private static Task<KeyPageModel> GetPageAsync(IRedisUIDataProvider provider, int database, long cursor,
+            int size, int offset, string pattern, CancellationToken cancellationToken) =>
+            provider is IRedisUIKeyPageProvider pages ? pages.GetKeysAsync(database, cursor, size, offset, pattern, cancellationToken) :
+            provider.GetKeysAsync(database, cursor, size, pattern, cancellationToken);
 
         public void Dispose()
         {
-            if (_ownsDataProvider)
-            {
-                _dataProvider.Dispose();
-            }
+            foreach (var connection in _connections.Values.Where(x => x.Owned)) connection.Provider.Dispose();
         }
 
         private static bool IsJsonRequest(string? contentType) =>
@@ -204,7 +230,7 @@ namespace RedisUI
         {
             if (string.IsNullOrWhiteSpace(value))
             {
-                pageSize = DefaultPageSize;
+                pageSize = Math.Min(DefaultPageSize, Math.Max(1, _settings.MaxPageSize));
                 return true;
             }
 
@@ -279,7 +305,7 @@ namespace RedisUI
                    CryptographicOperations.FixedTimeEquals(cookieBytes, headerBytes);
         }
 
-        private async Task TryHandleValuePreviewAsync(HttpContext context, int currentDb)
+        private async Task TryHandleValuePreviewAsync(HttpContext context, int currentDb, IRedisUIDataProvider provider)
         {
             if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
             {
@@ -307,7 +333,7 @@ namespace RedisUI
                 return;
             }
 
-            if (_dataProvider is not IRedisUIValuePreviewProvider valuePreviewProvider)
+            if (provider is not IRedisUIValuePreviewProvider valuePreviewProvider)
             {
                 await WritePlainTextAsync(context, StatusCodes.Status501NotImplemented, "The configured RedisUI data provider does not support lazy value previews.").ConfigureAwait(false);
                 return;
@@ -333,126 +359,116 @@ namespace RedisUI
             }
         }
 
-        private async Task<bool> TryHandleMutationAsync(HttpContext context, int currentDb)
+        private async Task<bool> TryHandleMutationAsync(HttpContext context, int database, string connection, IRedisUIDataProvider provider)
         {
-            context.Request.EnableBuffering();
-            context.Request.Body.Seek(0, SeekOrigin.Begin);
-
-            using var stream = new StreamReader(context.Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
-            var body = await stream.ReadToEndAsync().ConfigureAwait(false);
-            context.Request.Body.Seek(0, SeekOrigin.Begin);
-
-            if (string.IsNullOrWhiteSpace(body))
-            {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Request body is required.").ConfigureAwait(false);
-                return false;
-            }
-
-            PostModel? postModel;
+            PostModel? model;
+            try { model = await JsonSerializer.DeserializeAsync<PostModel>(context.Request.Body, JsonOptions, context.RequestAborted); }
+            catch (JsonException) { await WritePlainTextAsync(context, 400, "Request body was not valid JSON."); return false; }
+            if (model == null) { await WritePlainTextAsync(context, 400, "Request body is required."); return false; }
+            var deleting = !string.IsNullOrEmpty(model.DelKey) || (!string.IsNullOrEmpty(model.ElementKey) && model.ElementAction == "delete");
+            var editing = !string.IsNullOrEmpty(model.InsertKey) || !string.IsNullOrEmpty(model.SetExpiryKey) ||
+                (!string.IsNullOrEmpty(model.ElementKey) && model.ElementAction != "delete");
+            if ((!deleting && !editing)) { await WritePlainTextAsync(context, 400, "An operation is required."); return false; }
+            // Authorize the entire request before making any changes, including legacy combined requests.
+            if ((deleting && !Allowed(context, connection, database, RedisUIOperation.Delete)) ||
+                (editing && !Allowed(context, connection, database, RedisUIOperation.Edit)))
+            { await WritePlainTextAsync(context, 403, "This operation is not permitted."); return false; }
+            var type = model.InsertType?.ToLowerInvariant() ?? "string";
+            var mode = model.ExpiryMode;
+            if (model.InsertTTLSeconds.HasValue && mode == "keep") mode = "set"; // legacy clients
+            Dictionary<string, string>? streamFields = null;
+            double score = 0;
             try
             {
-                postModel = JsonSerializer.Deserialize<PostModel>(body);
+                if (mode is not ("keep" or "set" or "persist")) throw new ArgumentException("Invalid expiry mode.");
+                if (!string.IsNullOrEmpty(model.InsertKey))
+                {
+                    if (model.InsertValue == null) throw new ArgumentException("Value is required.");
+                    if (mode == "set" && (!model.InsertTTLSeconds.HasValue || model.InsertTTLSeconds <= 0 || model.InsertTTLSeconds > 315360000))
+                        throw new ArgumentException("TTL must be between 1 and 315360000 seconds.");
+                    if (type is not ("string" or "list" or "set" or "hash" or "sortedset" or "stream")) throw new ArgumentException("Invalid value type.");
+                    if (type == "hash" && string.IsNullOrEmpty(model.InsertField)) throw new ArgumentException("Hash insert requires a field name.");
+                    if (type == "sortedset" && (!double.TryParse(model.InsertScore, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out score) || !double.IsFinite(score)))
+                        throw new ArgumentException("Sorted set insert requires a finite score.");
+                    if (model.ValidateJson) { using var document = JsonDocument.Parse(model.InsertValue); }
+                    if (type == "stream")
+                    {
+                        streamFields = JsonSerializer.Deserialize<Dictionary<string, string>>(model.InsertValue);
+                        if (streamFields == null || streamFields.Count == 0 || streamFields.Values.Any(x => x == null)) throw new ArgumentException("Stream requires a JSON object of string fields.");
+                    }
+                }
+                if (model.ExpireSeconds.HasValue && (model.ExpireSeconds < 1 || model.ExpireSeconds > 315360000)) throw new ArgumentException("Expiry must be between 1 and 315360000 seconds.");
+                if (!string.IsNullOrEmpty(model.ElementKey))
+                {
+                    if (provider is not IRedisUIEditorProvider) { await WritePlainTextAsync(context, 501, "Provider does not support element editing."); return false; }
+                    if (model.ElementType is not ("hash" or "list" or "set" or "sortedset" or "stream") || model.ElementAction is not ("update" or "delete") ||
+                        (model.ElementType == "stream" && model.ElementAction != "delete") || !double.IsFinite(model.ElementScore)) throw new ArgumentException("Invalid element operation.");
+                    if (model.ElementType == "list" && (!long.TryParse(model.ElementSelector, out var index) || index < 0 || model.ExpectedValue == null)) throw new ArgumentException("List edits require an index and expected value.");
+                    if (model.ElementType == "stream" && !System.Text.RegularExpressions.Regex.IsMatch(model.ElementSelector, @"^\d+-\d+$")) throw new ArgumentException("Invalid stream entry ID.");
+                }
+                if (!string.IsNullOrEmpty(model.InsertKey) && type == "string" && provider is not IRedisUIEditorProvider &&
+                    (model.ExpectedValue != null || mode != "keep"))
+                { await WritePlainTextAsync(context, 501, "Provider does not support atomic string editing."); return false; }
             }
-            catch (JsonException)
-            {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Request body was not valid JSON.").ConfigureAwait(false);
-                return false;
-            }
+            catch (JsonException) { await WritePlainTextAsync(context, 400, "Value is not valid JSON."); return false; }
+            catch (ArgumentException ex) { await WritePlainTextAsync(context, 400, ex.Message); return false; }
 
-            if (postModel == null)
+            async Task Run(string operation, string key, Func<Task> action)
             {
-                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Request body was empty.").ConfigureAwait(false);
-                return false;
+                try { await action(); RecordAudit(context, connection, database, operation, key, true); }
+                catch { RecordAudit(context, connection, database, operation, key, false); throw; }
             }
-
+            var ct = context.RequestAborted;
             try
             {
-                if (!string.IsNullOrWhiteSpace(postModel.DelKey))
+                if (!string.IsNullOrEmpty(model.DelKey)) await Run("Delete", model.DelKey, () => provider.DeleteKeyAsync(database, model.DelKey, ct));
+                if (!string.IsNullOrEmpty(model.InsertKey)) await Run("Write " + type, model.InsertKey, async () =>
                 {
-                    await _dataProvider.DeleteKeyAsync(currentDb, postModel.DelKey, context.RequestAborted).ConfigureAwait(false);
-                }
-
-                if (!string.IsNullOrWhiteSpace(postModel.InsertKey) && !string.IsNullOrWhiteSpace(postModel.InsertValue))
+                    switch (type)
+                    {
+                        case "string":
+                            if (provider is IRedisUIEditorProvider editor)
+                            {
+                                if (!await editor.WriteStringAsync(database, model.InsertKey, model.InsertValue, mode, model.InsertTTLSeconds, model.ExpectedValue, ct)) throw new EditConflictException();
+                            }
+                            else await provider.SetStringAsync(database, model.InsertKey, model.InsertValue, ct);
+                            break;
+                        case "list": await provider.ListPushAsync(database, model.InsertKey, model.InsertValue, ct); break;
+                        case "set": await provider.SetAddAsync(database, model.InsertKey, model.InsertValue, ct); break;
+                        case "hash": await provider.HashSetAsync(database, model.InsertKey, model.InsertField, model.InsertValue, ct); break;
+                        case "sortedset": await provider.SortedSetAddAsync(database, model.InsertKey, model.InsertValue, score, ct); break;
+                        case "stream": await provider.StreamAddAsync(database, model.InsertKey, streamFields!, ct); break;
+                    }
+                    if (type != "string" && mode != "keep") await provider.SetExpiryAsync(database, model.InsertKey,
+                        mode == "set" ? TimeSpan.FromSeconds(model.InsertTTLSeconds!.Value) : null, ct);
+                });
+                if (!string.IsNullOrEmpty(model.SetExpiryKey)) await Run("Expiry", model.SetExpiryKey, () => provider.SetExpiryAsync(database,
+                    model.SetExpiryKey, model.ExpireSeconds.HasValue ? TimeSpan.FromSeconds(model.ExpireSeconds.Value) : null, ct));
+                if (!string.IsNullOrEmpty(model.ElementKey)) await Run(model.ElementAction + " " + model.ElementType + " element", model.ElementKey, async () =>
                 {
-                    switch (postModel.InsertType?.ToLowerInvariant())
-                    {
-                        case "list":
-                            await _dataProvider.ListPushAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
-                            break;
-
-                        case "set":
-                            await _dataProvider.SetAddAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
-                            break;
-
-                        case "hash":
-                            if (string.IsNullOrWhiteSpace(postModel.InsertField))
-                            {
-                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Hash insert requires a field name.").ConfigureAwait(false);
-                                return false;
-                            }
-                            await _dataProvider.HashSetAsync(currentDb, postModel.InsertKey, postModel.InsertField, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
-                            break;
-
-                        case "sortedset":
-                            if (!double.TryParse(postModel.InsertScore, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var score))
-                            {
-                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Sorted set insert requires a numeric score.").ConfigureAwait(false);
-                                return false;
-                            }
-                            await _dataProvider.SortedSetAddAsync(currentDb, postModel.InsertKey, postModel.InsertValue, score, context.RequestAborted).ConfigureAwait(false);
-                            break;
-
-                        case "stream":
-                            Dictionary<string, string>? streamFields;
-                            try
-                            {
-                                streamFields = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(postModel.InsertValue);
-                            }
-                            catch (System.Text.Json.JsonException)
-                            {
-                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Stream insert requires a JSON object, e.g. {\"field\":\"value\"}.").ConfigureAwait(false);
-                                return false;
-                            }
-                            if (streamFields == null || streamFields.Count == 0)
-                            {
-                                await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Stream fields JSON object must not be empty.").ConfigureAwait(false);
-                                return false;
-                            }
-                            await _dataProvider.StreamAddAsync(currentDb, postModel.InsertKey, streamFields, context.RequestAborted).ConfigureAwait(false);
-                            break;
-
-                        default: // "string"
-                            await _dataProvider.SetStringAsync(currentDb, postModel.InsertKey, postModel.InsertValue, context.RequestAborted).ConfigureAwait(false);
-                            break;
-                    }
-
-                    if (postModel.InsertTTLSeconds.HasValue && postModel.InsertTTLSeconds.Value > 0)
-                    {
-                        await _dataProvider.SetExpiryAsync(currentDb, postModel.InsertKey, TimeSpan.FromSeconds(postModel.InsertTTLSeconds.Value), context.RequestAborted).ConfigureAwait(false);
-                    }
-                }
-
-                if (!string.IsNullOrWhiteSpace(postModel.SetExpiryKey))
-                {
-                    if (postModel.ExpireSeconds.HasValue && postModel.ExpireSeconds.Value < 1)
-                    {
-                        await WritePlainTextAsync(context, StatusCodes.Status400BadRequest, "Expiry must be at least 1 second.").ConfigureAwait(false);
-                        return false;
-                    }
-
-                    var expiry = postModel.ExpireSeconds.HasValue
-                        ? TimeSpan.FromSeconds(postModel.ExpireSeconds.Value)
-                        : (TimeSpan?)null;
-                    await _dataProvider.SetExpiryAsync(currentDb, postModel.SetExpiryKey, expiry, context.RequestAborted).ConfigureAwait(false);
-                }
+                    if (!await ((IRedisUIEditorProvider)provider).EditElementAsync(database, model.ElementKey, model.ElementType, model.ElementAction,
+                        model.ElementSelector, model.ElementValue, model.ExpectedValue, model.ElementScore, ct)) throw new EditConflictException();
+                });
+                return true;
             }
+            catch (EditConflictException) { await WritePlainTextAsync(context, 409, "The value changed or no longer exists. Refresh before editing again."); return false; }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await WritePlainTextAsync(context, StatusCodes.Status500InternalServerError, RequestFailedMessage).ConfigureAwait(false);
+                _logger.LogWarning("RedisUI mutation failed on {Connection} ({ExceptionType}).", connection, ex.GetType().Name);
+                await WritePlainTextAsync(context, 500, RequestFailedMessage);
                 return false;
             }
+        }
 
-            return true;
+        private sealed class EditConflictException : Exception { }
+
+        private void RecordAudit(HttpContext context, string connection, int database, string operation, string key, bool succeeded)
+        {
+            var entry = new RedisUIAuditEntry(DateTimeOffset.UtcNow, context.User.Identity?.Name ?? "anonymous", connection, database, operation, key, succeeded);
+            _audit.Enqueue(entry);
+            while (_audit.Count > Math.Clamp(_settings.AuditCapacity, 0, 10000)) _audit.TryDequeue(out _);
+            try { _settings.AuditSink?.Invoke(entry); }
+            catch (Exception ex) { _logger.LogWarning("RedisUI audit sink failed ({ExceptionType}).", ex.GetType().Name); }
         }
 
         private static async Task WriteHtmlAsync(HttpContext context, string html)

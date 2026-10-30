@@ -5,6 +5,15 @@ namespace RedisUI
 {
     public class RedisUISettings
     {
+        public bool ReadOnly { get; set; }
+        public string Environment { get; set; } = "Unspecified";
+        public List<RedisUIConnection> Connections { get; set; } = new();
+        /// <summary>Additional operation-level authorization, checked on every request.</summary>
+        public Func<Microsoft.AspNetCore.Http.HttpContext, RedisUIAccess, bool>? AuthorizeOperation { get; set; }
+        public int MetadataConcurrency { get; set; } = 8;
+        public int AuditCapacity { get; set; } = 500;
+        /// <summary>Optional durable audit sink. Do not block; values are deliberately excluded.</summary>
+        public Action<RedisUIAuditEntry>? AuditSink { get; set; }
         /// <summary>
         /// Gets or sets the connection string for the Redis server.
         /// </summary>

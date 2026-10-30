@@ -7,7 +7,7 @@ using StackExchange.Redis;
 
 namespace RedisUI.Infra
 {
-    public sealed class RedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider
+    public sealed class RedisUIDataProvider : IRedisUIDataProvider, IRedisUIKeyPageProvider, IRedisUIValuePreviewProvider, IRedisUIEditorProvider
     {
         private readonly RedisUISettings _settings;
         private readonly Lazy<IConnectionMultiplexer>? _ownedConnection;
@@ -51,6 +51,7 @@ namespace RedisUI.Infra
 
             while (keys.Count < pageSize && scanIterations < maxScanIterations)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 scanIterations++;
                 RedisResult result;
 
@@ -78,9 +79,11 @@ namespace RedisUI.Infra
                 var remainingPageSize = pageSize - keys.Count;
                 var selectedKeyNames = availableKeyNames.Take(remainingPageSize).ToList();
 
-                foreach (var keyName in selectedKeyNames)
+                foreach (var batch in selectedKeyNames.Chunk(Math.Clamp(_settings.MetadataConcurrency, 1, 64)))
                 {
-                    keys.Add(await BuildKeyMetadataAsync(redisDb, keyName).ConfigureAwait(false));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var metadata = await Task.WhenAll(batch.Select(keyName => BuildKeyMetadataAsync(redisDb, keyName))).ConfigureAwait(false);
+                    keys.AddRange(metadata.Where(key => key.KeyType != nameof(RedisType.None)));
                 }
 
                 if (availableKeyNames.Count > selectedKeyNames.Count)
@@ -164,19 +167,19 @@ namespace RedisUI.Infra
         public async Task<StatisticsVm> GetStatisticsAsync(CancellationToken cancellationToken = default)
         {
             var redisDb = GetDatabase(0);
-            var keyspaces = await GetKeyspacesAsync(cancellationToken).ConfigureAwait(false);
-            var serverInfo = await redisDb.ExecuteAsync("INFO", "SERVER").ConfigureAwait(false);
-            var memoryInfo = await redisDb.ExecuteAsync("INFO", "MEMORY").ConfigureAwait(false);
-            var statsInfo = await redisDb.ExecuteAsync("INFO", "STATS").ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             var allInfo = await redisDb.ExecuteAsync("INFO").ConfigureAwait(false);
+            var infoText = allInfo.ToString();
+            var info = infoText.ToInfo();
 
             return new StatisticsVm
             {
-                Keyspaces = keyspaces.ToList(),
-                Server = ServerModel.Instance(serverInfo.ToString()),
-                Memory = MemoryModel.Instance(memoryInfo.ToString()),
-                Stats = StatsModel.Instance(statsInfo.ToString()),
-                AllInfo = allInfo.ToString().ToInfo()
+                Keyspaces = info.Where(x => x.Key.StartsWith("db", StringComparison.Ordinal) && int.TryParse(x.Key[2..], out _))
+                    .Select(x => KeyspaceModel.Instance(x.Key + ":" + x.Value)).ToList(),
+                Server = ServerModel.Instance(infoText),
+                Memory = MemoryModel.Instance(infoText),
+                Stats = StatsModel.Instance(infoText),
+                AllInfo = info
             };
         }
 
@@ -204,7 +207,78 @@ namespace RedisUI.Infra
         public async Task SetStringAsync(int database, string key, string value, CancellationToken cancellationToken = default)
         {
             var redisDb = GetDatabase(database);
-            await redisDb.ExecuteAsync("SET", key, value).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            await redisDb.ExecuteAsync("SET", key, value, "KEEPTTL").ConfigureAwait(false);
+        }
+
+        public async Task<bool> WriteStringAsync(int database, string key, string value, string expiryMode,
+            long? ttlSeconds, string? expectedValue, CancellationToken cancellationToken = default)
+        {
+            if (expiryMode is not ("keep" or "set" or "persist") ||
+                (expiryMode == "set" && (!ttlSeconds.HasValue || ttlSeconds <= 0)))
+                throw new ArgumentException("Invalid expiry policy.");
+            cancellationToken.ThrowIfCancellationRequested();
+            // Compare and write together so another editor cannot be silently overwritten.
+            const string script = """
+                if ARGV[4] == '1' and redis.call('GET', KEYS[1]) ~= ARGV[5] then return 0 end
+                if ARGV[2] == 'set' then redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+                elseif ARGV[2] == 'keep' then redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL')
+                else redis.call('SET', KEYS[1], ARGV[1]) end
+                return 1
+                """;
+            var result = await GetDatabase(database).ScriptEvaluateAsync(script, new RedisKey[] { key },
+                new RedisValue[] { value, expiryMode, ttlSeconds ?? 0, expectedValue == null ? "0" : "1", expectedValue ?? "" }).ConfigureAwait(false);
+            return (long)result == 1;
+        }
+
+        public async Task<bool> EditElementAsync(int database, string key, string type, string action,
+            string selector, string value, string? expectedValue, double score, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action is not ("update" or "delete")) throw new ArgumentException("Invalid element action.");
+            var db = GetDatabase(database);
+            var delete = action == "delete";
+            switch (type)
+            {
+                case "hash":
+                    if (delete) return await db.HashDeleteAsync(key, selector).ConfigureAwait(false);
+                    await db.HashSetAsync(key, selector, value).ConfigureAwait(false);
+                    return true;
+                case "set":
+                    return (long)await db.ScriptEvaluateAsync("""
+                        if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 0 then return 0 end
+                        if ARGV[3] == 'update' then
+                            redis.call('SADD', KEYS[1], ARGV[2])
+                            if ARGV[1] ~= ARGV[2] then redis.call('SREM', KEYS[1], ARGV[1]) end
+                        else redis.call('SREM', KEYS[1], ARGV[1]) end
+                        return 1
+                        """, new RedisKey[] { key }, new RedisValue[] { selector, value, action }).ConfigureAwait(false) == 1;
+                case "sortedset":
+                    if (!double.IsFinite(score)) throw new ArgumentException("Invalid score.");
+                    return (long)await db.ScriptEvaluateAsync("""
+                        if not redis.call('ZSCORE', KEYS[1], ARGV[1]) then return 0 end
+                        if ARGV[4] == 'update' then
+                            redis.call('ZADD', KEYS[1], ARGV[3], ARGV[2])
+                            if ARGV[1] ~= ARGV[2] then redis.call('ZREM', KEYS[1], ARGV[1]) end
+                        else redis.call('ZREM', KEYS[1], ARGV[1]) end
+                        return 1
+                        """, new RedisKey[] { key }, new RedisValue[] { selector, value, score, action }).ConfigureAwait(false) == 1;
+                case "list":
+                    if (!long.TryParse(selector, out var index) || index < 0 || expectedValue == null)
+                        throw new ArgumentException("List edits require an index and expected value.");
+                    return (long)await db.ScriptEvaluateAsync("""
+                        if redis.call('LINDEX', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+                        if ARGV[4] == 'delete' then
+                            if redis.call('LPOS', KEYS[1], ARGV[5]) then return 0 end
+                            redis.call('LSET', KEYS[1], ARGV[1], ARGV[5])
+                            redis.call('LREM', KEYS[1], 1, ARGV[5])
+                        else redis.call('LSET', KEYS[1], ARGV[1], ARGV[3]) end
+                        return 1
+                        """, new RedisKey[] { key }, new RedisValue[] { index, expectedValue, value, action, Guid.NewGuid().ToString("N") }).ConfigureAwait(false) == 1;
+                case "stream" when delete:
+                    return await db.StreamDeleteAsync(key, new RedisValue[] { selector }).ConfigureAwait(false) > 0;
+                default: throw new ArgumentException("Unsupported element operation.");
+            }
         }
 
         public async Task ListPushAsync(int database, string key, string element, CancellationToken cancellationToken = default)

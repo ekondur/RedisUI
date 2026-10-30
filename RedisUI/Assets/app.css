@@ -1,0 +1,318 @@
+:root {
+    font-family:system-ui,sans-serif;
+    color:#182534;
+    background:#f5f7fa;
+    color-scheme:light
+}
+body {
+    margin:0;
+    background:#f5f7fa;
+    color:#182534
+}
+* {
+    box-sizing:border-box
+}
+[hidden] {
+    display:none!important
+}
+.topbar {
+    display:flex;
+    align-items:center;
+    gap:14px;
+    flex-wrap:wrap;
+    padding:16px 24px;
+    background:#182534;
+    color:#fff
+}
+.topbar a {
+    color:#fff
+}
+.brand {
+    font-size:24px;
+    font-weight:700;
+    text-decoration:none
+}
+.topbar label {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin:0
+}
+.topbar input {
+    width:80px
+}
+.environment {
+    background:#24735e;
+    padding:5px 10px;
+    border-radius:6px
+}
+.production {
+    background:#a32c32;
+    font-weight:bold
+}
+.permissions {
+    font-size:12px;
+    opacity:.85
+}
+main {
+    padding:24px;
+    max-width:1920px;
+    margin:auto
+}
+button,input,select,textarea {
+    font:inherit;
+    border:1px solid #a9b5c3;
+    border-radius:5px;
+    padding:7px 10px;
+    background:white;
+    color:#182534
+}
+button {
+    cursor:pointer
+}
+button:hover {
+    background:#eaf0f7
+}
+button:disabled {
+    opacity:.5;
+    cursor:not-allowed
+}
+button.primary {
+    background:#176f5b;
+    color:white;
+    border-color:#176f5b
+}
+.danger {
+    color:#a32832;
+    border-color:#d59a9e
+}
+input[type=checkbox] {
+    width:auto
+}
+textarea {
+    width:100%;
+    font-family:ui-monospace,monospace
+}
+label {
+    font-size:14px
+}
+h2 {
+    font-size:18px;
+    margin:0 0 12px
+}
+h3 {
+    font-size:15px
+}
+.toolbar {
+    display:flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:16px
+}
+.toolbar form {
+    display:flex;
+    gap:8px;
+    flex:1
+}
+.toolbar form input {
+    min-width:180px;
+    flex:1
+}
+.workspace {
+    display:grid;
+    grid-template-columns:210px minmax(320px,1fr) minmax(340px,1fr);
+    gap:16px
+}
+.panel {
+    background:white;
+    border:1px solid #d8e0e8;
+    border-radius:8px;
+    padding:16px;
+    min-width:0
+}
+.muted {
+    font-size:12px;
+    color:#5c6b7a
+}
+.table-wrap {
+    overflow:auto;
+    max-height:65vh
+}
+table {
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px
+}
+th,td {
+    text-align:left;
+    padding:9px;
+    border-bottom:1px solid #e2e8ee;
+    vertical-align:top;
+    overflow-wrap:anywhere
+}
+th {
+    background:#f1f5f9;
+    position:sticky;
+    top:0
+}
+tr.selected {
+    background:#e6f3ed
+}
+.key-select {
+    border:0;
+    background:transparent;
+    text-align:left;
+    padding:0;
+    overflow-wrap:anywhere;
+    max-width:350px;
+    color:#175b9a
+}
+.key-list .delete-key {
+    font-size:12px
+}
+pre {
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    background:#f5f7fa;
+    padding:12px;
+    max-height:420px;
+    overflow:auto;
+    font-size:13px
+}
+#valueTitle {
+    overflow-wrap:anywhere
+}
+#keyTree details {
+    margin-left:8px
+}
+#keyTree button {
+    font-size:12px;
+    max-width:100%;
+    overflow-wrap:anywhere;
+    margin:3px
+}
+#keyTree summary {
+    font-size:12px;
+    overflow-wrap:anywhere
+}
+#auditPanel {
+    margin-top:20px
+}
+#notice {
+    padding:12px;
+    margin-bottom:16px;
+    border-radius:6px;
+    background:#e1f1e9;
+    color:#19523e
+}
+#notice.error {
+    background:#fbe6e6;
+    color:#882a2a
+}
+dialog {
+    width:min(760px,95vw);
+    max-height:90vh;
+    overflow:auto;
+    border:1px solid #b6c2ce;
+    border-radius:10px;
+    padding:24px;
+    box-shadow:0 12px 60px #0003
+}
+dialog::backdrop {
+    background:#17253588
+}
+dialog label {
+    display:block;
+    margin-bottom:12px
+}
+dialog label input:not([type=checkbox]),dialog label select {
+    display:block;
+    width:100%;
+    margin-top:4px
+}
+.diff {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px
+}
+.changed {
+    background:#fff2cc
+}
+#editorError {
+    color:#a32832
+}
+.metrics {
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:14px;
+    margin:20px 0
+}
+.metric-value {
+    font-size:24px;
+    font-weight:600
+}
+.metric-chart {
+    width:100%;
+    height:85px
+}
+.sr-only {
+    position:absolute;
+    width:1px;
+    height:1px;
+    overflow:hidden;
+    clip:rect(0,0,0,0)
+}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {
+    outline:3px solid #2481c6;
+    outline-offset:2px
+}
+.element-actions {
+    display:flex;
+    gap:4px
+}
+#expiryForm {
+    margin-top:16px;
+    display:flex;
+    gap:8px;
+    align-items:end;
+    flex-wrap:wrap
+}
+#expiryForm input {
+    width:140px;
+    display:block
+}
+@media(max-width:1150px) {
+    .workspace {
+        grid-template-columns:1fr 1fr
+    }
+    .workspace aside {
+        grid-column:1/-1
+    }
+    .metrics {
+        grid-template-columns:1fr 1fr
+    }
+}
+@media(max-width:700px) {
+    main {
+        padding:12px
+    }
+    .workspace,.metrics,.diff {
+        grid-template-columns:1fr
+    }
+    .topbar {
+        padding:12px;
+        gap:10px
+    }
+    .toolbar form {
+        flex-basis:100%
+    }
+    .permissions {
+        width:100%
+    }
+}
+
+
+#auditPanel table {
+    min-width:620px
+}

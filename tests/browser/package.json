@@ -1,0 +1,7 @@
+{
+  "name": "redisui-browser-tests",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": { "test": "node smoke.cjs" },
+  "devDependencies": { "playwright": "1.56.1" }
+}

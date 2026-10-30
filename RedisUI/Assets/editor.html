@@ -1,0 +1,17 @@
+<dialog id="editorDialog" aria-labelledby="editorTitle">
+  <form id="editorForm"><h2 id="editorTitle">Add key / element</h2>
+    <label>Key<input id="insertKey" required></label>
+    <label>Type<select id="insertType"><option value="string">String</option><option value="hash">Hash</option><option value="list">List</option><option value="set">Set</option><option value="sortedset">Sorted Set</option><option value="stream">Stream</option></select></label>
+    <label id="fieldGroup" hidden>Hash field<input id="insertField"></label>
+    <label id="scoreGroup" hidden>Score<input id="insertScore" type="number" step="any"></label>
+    <label id="selectorGroup" hidden>Element identifier<input id="elementSelector" readonly></label>
+    <label>Value<textarea id="insertValue" rows="8" spellcheck="false"></textarea></label>
+    <div class="toolbar"><label><input type="checkbox" id="validateJson">Validate JSON</label><button type="button" id="formatJson">Format JSON</button></div>
+    <p id="jsonStatus" class="muted" aria-live="polite"></p>
+    <label id="expiryModeGroup">Expiry<select id="expiryMode"><option value="keep">Keep existing TTL (new keys: persistent)</option><option value="set">Set a new TTL</option><option value="persist">Make persistent</option></select></label>
+    <label id="ttlGroup" hidden>TTL in seconds<input type="number" id="insertTTL" min="1" max="315360000"></label>
+    <details id="diffPanel" hidden><summary>Compare changes</summary><div class="diff"><div><h3>Before</h3><pre id="beforeValue"></pre></div><div><h3>After</h3><pre id="afterValue"></pre></div></div><p id="diffStatus" class="muted"></p></details>
+    <p id="editorError" role="alert"></p><div class="toolbar"><button id="saveKey" class="primary">Save</button><button type="button" id="closeEditor">Cancel</button></div>
+  </form>
+</dialog>
+<dialog id="deleteDialog" aria-labelledby="deleteTitle"><h2 id="deleteTitle">Confirm deletion</h2><p id="deleteMessage"></p><div class="toolbar"><button id="confirmDelete" class="danger">Delete</button><button id="cancelDelete">Cancel</button></div></dialog>
