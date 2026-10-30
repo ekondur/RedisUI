@@ -19,11 +19,11 @@
 	  <RepositoryUrl>https://github.com/ekondur/RedisUI</RepositoryUrl>
 	  <RepositoryType>git</RepositoryType>
 	  <PackageTags>Redis,Web,UI,Client,Keys,Statistics</PackageTags>
-	  <PackageReleaseNotes>https://github.com/ekondur/RedisUI/releases/tag/v1.9.0</PackageReleaseNotes>
+	  <PackageReleaseNotes>https://github.com/ekondur/RedisUI/releases/tag/v2.0.0</PackageReleaseNotes>
 	  <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 	  <IncludeSymbols>True</IncludeSymbols>
 	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-	  <Version>1.9.0</Version>
+	  <Version>2.0.0</Version>
   </PropertyGroup>
 
 	<ItemGroup>
